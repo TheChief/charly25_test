@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <limits.h>
 #include <stdint.h>
 #include <string.h>
@@ -16,17 +17,15 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/if.h>
+#include <linux/i2c-dev.h>
 
 #include "jack/ringbuffer.c"
 
-#define I2C_SLAVE       0x0703 /* Use this slave address */
-#define I2C_SLAVE_FORCE 0x0706 /* Use this slave address, even if it
-                                  is already in use by a driver! */
+/* I2C address of the 4-band trx frontend */
+const unsigned long ADDR_4BAND = 0x20;
 
-#define ADDR_PENE 0x20 /* PCA9555 address 0 */
-#define ADDR_ALEX 0x21 /* PCA9555 address 1 */
-
-volatile uint32_t *rx_freq[4], *rx_rate, *tx_freq, *alex;
+/* FPGA communication */
+volatile uint32_t *rx_freq[4], *rx_rate, *tx_freq;
 volatile uint16_t *rx_cntr, *tx_cntr;
 volatile uint8_t *gpio_in, *gpio_out, *rx_rst, *tx_rst;
 volatile uint64_t *rx_data;
@@ -49,12 +48,10 @@ void *handler_playback(void *arg);
 
 jack_ringbuffer_t *playback_data = 0;
 
-/* variables to handle PCA9555 board */
+/* I2C handling */
 int i2c_fd;
-int i2c_pene = 0;
-int i2c_alex = 0;
-uint16_t i2c_pene_data = 0;
-uint16_t i2c_alex_data = 0;
+bool i2c_4band = false;
+uint16_t i2c_4band_data = 0;
 
 ssize_t i2c_write(int fd, uint8_t addr, uint16_t data)
 {
@@ -65,81 +62,6 @@ ssize_t i2c_write(int fd, uint8_t addr, uint16_t data)
   return write(fd, buffer, 3);
 }
 
-uint16_t alex_data_rx = 0;
-uint16_t alex_data_tx = 0;
-uint16_t alex_data_0 = 0;
-uint32_t alex_data_1 = 0;
-uint32_t alex_data_2 = 0;
-uint32_t alex_data_3 = 0;
-uint16_t alex_data_4 = 0;
-
-void alex_write()
-{
-  uint32_t max = alex_data_2 > alex_data_3 ? alex_data_2 : alex_data_3;
-  uint16_t manual = (alex_data_4 >> 15) & 0x01;
-  uint16_t preamp = manual ? (alex_data_4 >> 6) & 0x01 : max > 50000000;
-  uint16_t ptt = alex_data_0 & 0x01;
-  uint32_t freq = 0;
-  uint16_t hpf = 0, lpf = 0, data = 0;
-
-  freq = alex_data_2 < alex_data_3 ? alex_data_2 : alex_data_3;
-
-  if(preamp) hpf = 0;
-  else if(manual) hpf = alex_data_4 & 0x3f;
-  else if(freq < 1416000) hpf = 0x20; /* bypass */
-  else if(freq < 6500000) hpf = 0x10; /* 1.5 MHz HPF */
-  else if(freq < 9500000) hpf = 0x08; /* 6.5 MHz HPF */
-  else if(freq < 13000000) hpf = 0x04; /* 9.5 MHz HPF */
-  else if(freq < 20000000) hpf = 0x01; /* 13 MHz HPF */
-  else hpf = 0x02; /* 20 MHz HPF */
-
-  data =
-    ptt << 15 |
-    ((alex_data_0 >> 1) & 0x01) << 14 |
-    ((alex_data_0 >> 2) & 0x01) << 13 |
-    ((hpf >> 5) & 0x01) << 12 |
-    ((alex_data_0 >> 7) & 0x01) << 11 |
-    (((alex_data_0 >> 5) & 0x03) == 0x01) << 10 |
-    (((alex_data_0 >> 5) & 0x03) == 0x02) << 9 |
-    (((alex_data_0 >> 5) & 0x03) == 0x03) << 8 |
-    ((hpf >> 2) & 0x07) << 4 |
-    preamp << 3 |
-    (hpf & 0x03) << 1 |
-    1;
-
-  if(alex_data_rx != data)
-  {
-    alex_data_rx = data;
-    *alex = 1 << 16 | data;
-  }
-
-  freq = ptt ? alex_data_1 : max;
-
-  if(manual) lpf = (alex_data_4 >> 8) & 0x7f;
-  else if(freq > 32000000) lpf = 0x10; /* bypass */
-  else if(freq > 22000000) lpf = 0x20; /* 12/10 meters */
-  else if(freq > 15000000) lpf = 0x40; /* 17/15 meters */
-  else if(freq > 8000000) lpf = 0x01; /* 30/20 meters */
-  else if(freq > 4500000) lpf = 0x02; /* 60/40 meters */
-  else if(freq > 2400000) lpf = 0x04; /* 80 meters */
-  else lpf = 0x08; /* 160 meters */
-
-  data =
-    ((lpf >> 4) & 0x07) << 13 |
-    ptt << 12 |
-    (~(alex_data_4 >> 7) & ptt) << 11 |
-    (((alex_data_0 >> 8) & 0x03) == 0x02) << 10 |
-    (((alex_data_0 >> 8) & 0x03) == 0x01) << 9 |
-    (((alex_data_0 >> 8) & 0x03) == 0x00) << 8 |
-    (lpf & 0x0f) << 4 |
-    1 << 3;
-
-  if(alex_data_tx != data)
-  {
-    alex_data_tx = data;
-    *alex = 1 << 17 | data;
-  }
-}
 
 int main(int argc, char *argv[])
 {
@@ -163,31 +85,21 @@ int main(int argc, char *argv[])
 
   if((i2c_fd = open("/dev/i2c-0", O_RDWR)) >= 0)
   {
-    if(ioctl(i2c_fd, I2C_SLAVE_FORCE, ADDR_PENE) >= 0)
+    if(ioctl(i2c_fd, I2C_SLAVE, ADDR_4BAND) >= 0)
     {
       /* set all pins to low */
-      if(i2c_write(i2c_fd, 0x02, 0x0000) > 0)
+      if(i2c_write(i2c_fd, 0x02, 0x0000))
       {
-        i2c_pene = 1;
-        /* configure all pins as output */
-        i2c_write(i2c_fd, 0x06, 0x0000);
-      }
-    }
-    if(ioctl(i2c_fd, I2C_SLAVE, ADDR_ALEX) >= 0)
-    {
-      /* set all pins to low */
-      if(i2c_write(i2c_fd, 0x02, 0x0000) > 0)
-      {
-        i2c_alex = 1;
+        i2c_4band = true;
         /* configure all pins as output */
         i2c_write(i2c_fd, 0x06, 0x0000);
       }
     }
   }
 
+  /* Connection to ps_0_axi_periph on the FPGA */
   sts = mmap(NULL, sysconf(_SC_PAGESIZE), PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0x40000000);
   cfg = mmap(NULL, sysconf(_SC_PAGESIZE), PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0x40001000);
-  alex = mmap(NULL, sysconf(_SC_PAGESIZE), PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0x40002000);
   rx_data = mmap(NULL, 8*sysconf(_SC_PAGESIZE), PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0x40008000);
   tx_data = mmap(NULL, 16*sysconf(_SC_PAGESIZE), PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0x40010000);
 
@@ -326,7 +238,9 @@ int main(int argc, char *argv[])
 void process_ep2(uint8_t *frame)
 {
   uint32_t freq;
-  uint16_t data;
+  /* Might get changed throughout this method */
+  /* Doesn't get sent if it doesn't change to reduce load on the I2C bus */
+  uint16_t data = i2c_4band_data;
 
   switch(frame[0])
   {
@@ -357,46 +271,81 @@ void process_ep2(uint8_t *frame)
           break;
       }
 
-      data = (frame[4] & 0x03) << 8 | (frame[3] & 0xe0) | (frame[3] & 0x03) << 1 | (frame[0] & 0x01);
-      if(alex_data_0 != data)
+      /* Wipe bytes that might get changed in this frame */
+      /* first f are LPFs, second f is unused so far */
+      data &= 0x0ff0;
+
+      /* PTT */
+      data |= (frame[0] & 1) << 12;
+      /* Turn on PA if at least one LPF is open */
+      if((data & 0x0f00) != 0)
       {
-        alex_data_0 = data;
-        alex_write();
+        data |= (frame[0] & 1) << 13;
       }
 
-      /* configure PENELOPE */
-      if(i2c_pene)
+      /* Attenuator */
+      data |= frame[3] & 3;
+
+      /* Preamplifier */
+      /* The HPSDR protocol only uses one bit for preamp control, however our
+         board has two preamps. The temporary solution is that on 6m and 10m,
+         the first preamp will always be on with the second one being
+         controllable, whereas on the lower bands the second preamp will always
+         be off and the first preamp can be controlled. 6m and 10m were chosen
+         because the RP is already sensitive enough on other bands so that a
+         second preamp isn't necessary there. Ideally this should be
+         configurable through the web interface */
+      /* Use 27 MHz as the cutoff frequency */
+      if(*rx_freq[0] > (uint32_t) floor(27.0 / 125.0 * (1 << 30) + 0.5))
       {
-        data = (frame[4] & 0x03) << 11 | (frame[3] & 0x60) << 4 | (frame[3] & 0x03) << 7 | frame[2] >> 1;
-        if(i2c_pene_data != data)
-        {
-          i2c_pene_data = data;
-          ioctl(i2c_fd, I2C_SLAVE, ADDR_PENE);
-          i2c_write(i2c_fd, 0x02, data);
-        }
+        data |= 1 << 2;
+        data |= frame[3] & 4;
       }
+      else
+      {
+        data |= (frame[3] & 4) >> 1;
+      }
+
       break;
     case 2:
     case 3:
       /* set tx phase increment */
       freq = ntohl(*(uint32_t *)(frame + 1));
-      if(alex_data_1 != freq)
-      {
-        alex_data_1 = freq;
-        alex_write();
-      }
       if(freq < freq_min || freq > freq_max) break;
       *tx_freq = (uint32_t)floor(freq / 125.0e6 * (1 << 30) + 0.5);
+
+      /* Switch LPF depending on TX frequency */
+      /* Cutoff frequencies aren't adjusted to actual filter curves atm, and
+         roughly follow the amateur radio bands with some generous padding. Just
+         like preamp settings, this should probably be configurable via web
+         interface to make switching filters easier */
+      data &= 0xf0ff;
+      if(30000000 > freq && freq > 24500000) /* 10m LPF can be used on 12m */
+      {
+        data &= 0xf0ff;
+        data |= 1 << 8;
+      }
+      else if(14500000 > freq && freq > 13800000)
+      {
+        data &= 0xf0ff;
+        data |= 1 << 9;
+      }
+      else if(7500000 > freq && freq > 6800000)
+      {
+        data &= 0xf0ff;
+        data |= 1 << 10;
+      }
+      else if(4200000 > freq && freq > 3300000)
+      {
+        data &= 0xf0ff;
+        data |= 1 << 11;
+      }
+
       break;
     case 4:
     case 5:
       /* set rx phase increment */
       freq = ntohl(*(uint32_t *)(frame + 1));
-      if(alex_data_2 != freq)
-      {
-        alex_data_2 = freq;
-        alex_write();
-      }
       if(freq < freq_min || freq > freq_max) break;
       *rx_freq[0] = (uint32_t)floor(freq / 125.0e6 * (1 << 30) + 0.5);
       break;
@@ -404,11 +353,6 @@ void process_ep2(uint8_t *frame)
     case 7:
       /* set rx phase increment */
       freq = ntohl(*(uint32_t *)(frame + 1));
-      if(alex_data_3 != freq)
-      {
-        alex_data_3 = freq;
-        alex_write();
-      }
       if(freq < freq_min || freq > freq_max) break;
       *rx_freq[1] = (uint32_t)floor(freq / 125.0e6 * (1 << 30) + 0.5);
       break;
@@ -426,27 +370,12 @@ void process_ep2(uint8_t *frame)
       if(freq < freq_min || freq > freq_max) break;
       *rx_freq[3] = (uint32_t)floor(freq / 125.0e6 * (1 << 30) + 0.5);
       break;
-    case 18:
-    case 19:
-      data = (frame[2] & 0x40) << 9 | frame[4] << 8 | frame[3];
-      if(alex_data_4 != data)
-      {
-        alex_data_4 = data;
-        alex_write();
-      }
+  }
 
-      /* configure ALEX */
-      if(i2c_alex)
-      {
-        data = frame[4] << 8 | frame[3];
-        if(i2c_alex_data != data)
-        {
-          i2c_alex_data = data;
-          ioctl(i2c_fd, I2C_SLAVE, ADDR_ALEX);
-          i2c_write(i2c_fd, 0x02, data);
-        }
-      }
-      break;
+  if (i2c_4band && data != i2c_4band_data) {
+    i2c_4band_data = data;
+    ioctl(i2c_fd, I2C_SLAVE, ADDR_4BAND);
+    i2c_write(i2c_fd, 0x02, data);
   }
 }
 
