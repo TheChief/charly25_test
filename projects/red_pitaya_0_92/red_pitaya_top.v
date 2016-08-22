@@ -153,8 +153,8 @@ module red_pitaya_top
    input            Vaux9_v_n          ,
 
    // Expansion connector
-   inout  [ 8-1: 0] exp_p_tri_io       ,
-   inout  [ 8-1: 0] exp_n_tri_io       ,
+//    inout  [ 8-1: 0] exp_p_tri_io       ,
+   inout  [ 4-1: 0] exp_n_tri_io       , // SDR only uses 4 pins
 
 
    // SATA connector
@@ -463,19 +463,25 @@ red_pitaya_hk i_hk
 );
 
 
+// exclude all IO connections that SDR does not use on extention connector E1
+// genvar GV ;
+// 
+// generate
+// for( GV = 0 ; GV < 8 ; GV = GV + 1)
+// begin : exp_iobuf
+//   IOBUF i_iobufp (.O(exp_p_in[GV]), .IO(exp_p_tri_io[GV]), .I(exp_p_out[GV]), .T(!exp_p_dir[GV]) );
+//   IOBUF i_iobufn (.O(exp_n_in[GV]), .IO(exp_n_tri_io[GV]), .I(exp_n_out[GV]), .T(!exp_n_dir[GV]) );
+// end
+// endgenerate
 
-genvar GV ;
-
-generate
-for( GV = 0 ; GV < 8 ; GV = GV + 1)
-begin : exp_iobuf
-  IOBUF i_iobufp (.O(exp_p_in[GV]), .IO(exp_p_tri_io[GV]), .I(exp_p_out[GV]), .T(!exp_p_dir[GV]) );
-  IOBUF i_iobufn (.O(exp_n_in[GV]), .IO(exp_n_tri_io[GV]), .I(exp_n_out[GV]), .T(!exp_n_dir[GV]) );
-end
-endgenerate
-
-
-
+// PTT_out
+IOBUF i_iobufn (.O(exp_n_in[0]), .IO(exp_n_tri_io[0]), .I(exp_n_out[0]), .T(!exp_n_dir[0]) );
+// PTT_in
+IOBUF i_iobufn (.O(exp_n_in[1]), .IO(exp_n_tri_io[1]), .I(exp_n_out[1]), .T(!exp_n_dir[1]) );
+// DASH
+IOBUF i_iobufn (.O(exp_n_in[2]), .IO(exp_n_tri_io[2]), .I(exp_n_out[2]), .T(!exp_n_dir[2]) );
+// DOT
+IOBUF i_iobufn (.O(exp_n_in[3]), .IO(exp_n_tri_io[3]), .I(exp_n_out[3]), .T(!exp_n_dir[3]) );
 
 
 //---------------------------------------------------------------------------------
