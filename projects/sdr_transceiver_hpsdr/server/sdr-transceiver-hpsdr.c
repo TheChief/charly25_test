@@ -299,11 +299,11 @@ void process_ep2(uint8_t *frame)
       if(*rx_freq[0] > (uint32_t) floor(27.0 / 125.0 * (1 << 30) + 0.5))
       {
         data |= 1 << 2;
-        data |= frame[3] & 4;
+        data |= (frame[3] & 4) << 1;
       }
       else
       {
-        data |= (frame[3] & 4) >> 1;
+        data |= frame[3] & 4;
       }
 
       break;
@@ -322,22 +322,18 @@ void process_ep2(uint8_t *frame)
       data &= 0xf0ff;
       if(30000000 > freq && freq > 24500000) /* 10m LPF can be used on 12m */
       {
-        data &= 0xf0ff;
         data |= 1 << 8;
       }
       else if(14500000 > freq && freq > 13800000)
       {
-        data &= 0xf0ff;
         data |= 1 << 9;
       }
       else if(7500000 > freq && freq > 6800000)
       {
-        data &= 0xf0ff;
         data |= 1 << 10;
       }
       else if(4200000 > freq && freq > 3300000)
       {
-        data &= 0xf0ff;
         data |= 1 << 11;
       }
 
