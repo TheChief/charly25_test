@@ -117,11 +117,11 @@ cell pavel-demin:user:axi_cfg_register:1.0 cfg_0 {
 delete_bd_objs [get_bd_ports exp_p_tri_io]
 
 # Create output port
-create_bd_port -dir O -from 7 -to 0 exp_p_tri_io
+create_bd_port -dir O -from 0 -to 0 exp_p_tri_io
 
 # Create xlslice
 cell xilinx.com:ip:xlslice:1.0 out_slice_0 {
-  DIN_WIDTH 224 DIN_FROM 23 DIN_TO 16 DOUT_WIDTH 8
+  DIN_WIDTH 224 DIN_FROM 16 DIN_TO 16 DOUT_WIDTH 1
 } {
   Din cfg_0/cfg_data
   Dout exp_p_tri_io
@@ -131,11 +131,11 @@ cell xilinx.com:ip:xlslice:1.0 out_slice_0 {
 delete_bd_objs [get_bd_ports exp_n_tri_io]
 
 # Create input/output port
-create_bd_port -dir IO -from 3 -to 0 exp_n_tri_io
+create_bd_port -dir IO -from 2 -to 0 exp_n_tri_io
 
 # Create gpio_debouncer
 cell pavel-demin:user:gpio_debouncer:1.0 gpio_0 {
-  DATA_WIDTH 4
+  DATA_WIDTH 3
   CNTR_WIDTH 22
 } {
   gpio_data exp_n_tri_io
@@ -153,7 +153,7 @@ cell xilinx.com:ip:util_vector_logic:2.0 not_0 {
 # ALEX
 
 # Create output port
-create_bd_port -dir O -from 3 -to 0 exp_n_alex
+create_bd_port -dir O -from 3 -to 0 exp_n_alex_dummy
 
 # Create axi_axis_writer
 cell pavel-demin:user:axi_axis_writer:1.0 writer_0 {
@@ -177,7 +177,7 @@ cell xilinx.com:ip:axis_data_fifo:1.1 fifo_0 {
 # Create axis_alex
 cell pavel-demin:user:axis_alex:1.0 alex_0 {} {
   S_AXIS fifo_0/M_AXIS
-  alex_data exp_n_alex
+  alex_data exp_n_alex_dummy
   aclk ps_0/FCLK_CLK0
   aresetn rst_0/peripheral_aresetn
 }
