@@ -153,7 +153,7 @@ cell xilinx.com:ip:util_vector_logic:2.0 not_0 {
 # ALEX
 
 # Create output port
-create_bd_port -dir O -from 3 -to 0 exp_n_alex_dummy
+create_bd_port -dir O -from 3 -to 0 exp_n_alex
 
 # Create axi_axis_writer
 cell pavel-demin:user:axi_axis_writer:1.0 writer_0 {
@@ -177,7 +177,7 @@ cell xilinx.com:ip:axis_data_fifo:1.1 fifo_0 {
 # Create axis_alex
 cell pavel-demin:user:axis_alex:1.0 alex_0 {} {
   S_AXIS fifo_0/M_AXIS
-  alex_data exp_n_alex_dummy
+  alex_data exp_n_alex
   aclk ps_0/FCLK_CLK0
   aresetn rst_0/peripheral_aresetn
 }
