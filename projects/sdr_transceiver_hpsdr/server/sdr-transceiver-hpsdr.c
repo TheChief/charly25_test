@@ -161,7 +161,7 @@ int main(int argc, char *argv[])
     return EXIT_FAILURE;
   }
 
-  if((i2c_fd = open("/dev/i2c-0", O_RDWR)) >= 0)
+  if((i2c_fd = open("/dev/i2c-1", O_RDWR)) >= 0)
   {
     if(ioctl(i2c_fd, I2C_SLAVE_FORCE, ADDR_PENE) >= 0)
     {
