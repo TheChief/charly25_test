@@ -4,4 +4,5 @@ echo 1 > $devcfg/fclk/fclk0/enable
 echo 125000000 > $devcfg/fclk/fclk0/set_rate
 
 killall sdr-transceiver-hpsdr
-hvlv -i
+hamrf -i
+gpiorelay -i
