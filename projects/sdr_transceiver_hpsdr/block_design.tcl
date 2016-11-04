@@ -121,7 +121,11 @@ create_bd_port -dir O -from 0 -to 0 exp_p_tri_io
 
 # Create xlslice
 cell xilinx.com:ip:xlslice:1.0 out_slice_0 {
+<<<<<<< HEAD
   DIN_WIDTH 224 DIN_FROM 16 DIN_TO 16 DOUT_WIDTH 1
+=======
+  DIN_WIDTH 320 DIN_FROM 24 DIN_TO 24 DOUT_WIDTH 8
+>>>>>>> 4d1018b... redpitaya: remapping FPGA IO
 } {
   Din cfg_0/cfg_data
   Dout exp_p_tri_io
@@ -136,7 +140,7 @@ create_bd_port -dir IO -from 2 -to 0 exp_n_tri_io
 # Create gpio_debouncer
 cell pavel-demin:user:gpio_debouncer:1.0 gpio_0 {
   DATA_WIDTH 3
-  CNTR_WIDTH 22
+  CNTR_WIDTH 16
 } {
   gpio_data exp_n_tri_io
   aclk ps_0/FCLK_CLK0
