@@ -8,11 +8,22 @@
 */
 /* 03.10.2016 DL8GM and DG8MG: Modified code for Charly 25 - 4 band transceiver board switching via I2C.
 11.10.2016 DG8MG: Modified code for band independent switching of the two preamps on the Charly 25 LC board
-06.11.2016 DG8MG: Modified code to make it compatible with Pavel Demin's commit: https://github.com/pavel-demin/red-pitaya-notes/commit/e6bcfe06d8e7f9191cce2b8f7463f82f81b0d3b0
+15.11.2016 DG8MG: Modified code to make it compatible with Pavel Demin's commit: https://github.com/pavel-demin/red-pitaya-notes/commit/e6bcfe06d8e7f9191cce2b8f7463f82f81b0d3b0
 */
 
-// DG8MG - Define CHARLY25LC identifier for Charly 25LC specific builds
+// DG8MG
+// Define CHARLY25LC for Charly 25LC specific builds
 #define CHARLY25LC 1
+
+// Define CHARLY25LC_STRIPPED together with CHARLY25LC for Charly 25LC specific builds without extentions - this may lead to broken code!!!
+// #define CHARLY25LC_STRIPPED 1
+
+// Define CHARLY25LC_HAMLAB together with CHARLY25LC for Hamlab specific builds
+#define CHARLY25LC_HAMLAB 1
+
+// Define DEBUG for debug messages
+// #DEBUG 1
+// DG8MG
 
 #include <stdio.h>
 #include <errno.h>
@@ -41,7 +52,7 @@
 #define I2C_SLAVE_FORCE 0x0706 /* Use this slave address, even if it
                                   is already in use by a driver! */
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
 #define ADDR_PENE 0x20 /* PCA9555 address 0 */
 #define ADDR_ALEX 0x21 /* PCA9555 address 1 */
 #define ADDR_LEVEL 0x22 /* PCA9555 address 2 */
@@ -82,7 +93,7 @@ void *handler_playback(void *arg);
 
 jack_ringbuffer_t *playback_data = 0;
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
 /* variables to handle I2C devices */
 int i2c_fd;
 int i2c_pene = 0;
@@ -103,7 +114,11 @@ uint16_t i2c_dac1_data = 0xfff;
 uint8_t i2c_boost_data = 0;
 
 uint8_t cw_int_data = 0;
+#endif
+
 uint8_t cw_mux_data = 0;
+
+#ifndef CHARLY25LC_STRIPPED
 uint8_t rx_att_data = 0;
 
 ssize_t i2c_write_addr_data8(int fd, uint8_t addr, uint8_t data)
@@ -294,8 +309,13 @@ int main(int argc, char *argv[])
     return EXIT_FAILURE;
   }
 
-#ifdef CHARLY25LC
+#ifdef CHARLY25LC_HAMLAB
   if((i2c_fd = open("/dev/i2c-1", O_RDWR)) >= 0)
+#else
+  if((i2c_fd = open("/dev/i2c-0", O_RDWR)) >= 0)
+#endif
+
+#ifdef CHARLY25LC
   {
     if(ioctl(i2c_fd, I2C_SLAVE_FORCE, ADDR_4BAND) >= 0)
     {
@@ -305,28 +325,28 @@ int main(int argc, char *argv[])
         i2c_4band = true;
         /* configure all pins as output */
         i2c_write(i2c_fd, 0x06, 0x0000);
-		// fprintf(stderr, "4Band: %d, Configure all pins as output - i2c_write return value: %d\n", i2c_4band, i2c_write(i2c_fd, 0x06, 0x0000));
+        // fprintf(stderr, "4Band: %d, Configure all pins as output - i2c_write return value: %d\n", i2c_4band, i2c_write(i2c_fd, 0x06, 0x0000));
       }
-	  else
-	  {
-	    fprintf(stderr, "I2C write error!\n");
-	    return EXIT_FAILURE;
+      else
+      {
+        fprintf(stderr, "I2C write error!\n");
+        return EXIT_FAILURE;
       }
     }
-	else
-	{
-	  fprintf(stderr, "I2C ioctl error!\n");
-	  return EXIT_FAILURE;
+    else
+    {
+      fprintf(stderr, "I2C ioctl error!\n");
+      return EXIT_FAILURE;
     }
   }
   else
   {
     fprintf(stderr, "I2C open error!\n");
-	return EXIT_FAILURE;
+    return EXIT_FAILURE;
   }
   
   // Version info for debugging only!
-  fprintf(stderr, "Version 06112016: Charly 25LC / Hamlab Edition - Two preamps switchable.\n");
+  fprintf(stderr, "Version 15112016: Charly 25LC / Hamlab Edition\n");
 #endif
 
 #ifndef CHARLY25LC
@@ -462,7 +482,7 @@ int main(int argc, char *argv[])
   adc_cntr = ((uint16_t *)(sts + 18));
   gpio_in = ((uint8_t *)(sts + 20));
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
   /* set all GPIO pins to low */
   *gpio_out = 0;
 #endif
@@ -504,7 +524,7 @@ int main(int argc, char *argv[])
   *tx_rst |= 1;
   *tx_rst &= ~1;
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
   /* disable tx keyer */
   *tx_rst &= ~2;
 
@@ -547,7 +567,7 @@ int main(int argc, char *argv[])
 
   {
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
     /* enable ALEX interface */
     *codec_rst |= 8;
 #endif
@@ -614,18 +634,18 @@ int main(int argc, char *argv[])
     for(i = 0; i < size; ++i)
     {
       memcpy(&code, buffer[i], 4);
+
+#ifdef DEBUG
+      fprintf(stderr, "code: %x, cw_mux_data: %d\n", code, cw_mux_data);
+#endif
+
       switch(code)
       {
         case 0x0201feef:
-#ifndef CHARLY25LC
           if(!cw_mux_data)
           {
-#endif
-
-			while(*tx_cntr > 1922) usleep(1000);
+            while(*tx_cntr > 1922) usleep(1000);
             if(*tx_cntr == 0) for(j = 0; j < 1260; ++j) *tx_data = 0;
-
-#ifndef CHARLY25LC
             if((*gpio_out & 1) | (*gpio_in & 1))
             {
               for(j = 0; j < 504; j += 8) *tx_data = *(uint32_t *)(buffer[i] + 20 + j);
@@ -636,6 +656,8 @@ int main(int argc, char *argv[])
               for(j = 0; j < 126; ++j) *tx_data = 0;
             }
           }
+
+#ifndef CHARLY25LC_STRIPPED
           if(i2c_codec)
           {
             if(!cw_mux_data)
@@ -648,8 +670,8 @@ int main(int argc, char *argv[])
           }
           else
 #endif
-		  {
-			for(j = 0; j < 504; j += 8) jack_ringbuffer_write(playback_data, buffer[i] + 16 + j, 4);
+          {
+            for(j = 0; j < 504; j += 8) jack_ringbuffer_write(playback_data, buffer[i] + 16 + j, 4);
             for(j = 0; j < 504; j += 8) jack_ringbuffer_write(playback_data, buffer[i] + 528 + j, 4);
           }
           process_ep2(buffer[i] + 11);
@@ -702,23 +724,16 @@ void process_ep2(uint8_t *frame)
 #ifdef CHARLY25LC
   /* Might get changed throughout this method */
   /* Doesn't get sent if it doesn't change to reduce load on the I2C bus */
-  data = i2c_4band_data;
- 
-  /*
-  fprintf(stderr, "Frame[0]: %d\n", frame[0]);
-  fprintf(stderr, "Frame[1]: %d\n", frame[1]);	  
-  fprintf(stderr, "Frame[2]: %d\n", frame[2]);
-  fprintf(stderr, "Frame[3]: %d\n", frame[3]);
-  fprintf(stderr, "Frame[4]: %d\n", frame[4]);
-  */
+  uint16_t new_i2c_4band_data = i2c_4band_data; 
 #endif
+  
   switch(frame[0])
   {
     case 0:
     case 1:
       receivers = ((frame[4] >> 3) & 7) + 1;
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
       /* set output pins */
       ptt = frame[0] & 0x01;
       att = frame[3] & 0x03;
@@ -768,20 +783,20 @@ void process_ep2(uint8_t *frame)
       }
 
 #ifdef CHARLY25LC
-	  /* Wipe bytes that might get changed in this frame */
+      /* Wipe bytes that might get changed in this frame */
       /* first f are LPFs, second f is unused so far */
-      data &= 0x0ff0;
+      new_i2c_4band_data &= 0x0ff0;
 
       /* PTT */
-      data |= (frame[0] & 1) << 12;
+      new_i2c_4band_data |= (frame[0] & 1) << 12;
       /* Turn on PA if at least one LPF is open */
-      if((data & 0x0f00) != 0)
+      if((new_i2c_4band_data & 0x0f00) != 0)
       {
-        data |= (frame[0] & 1) << 13;
+        new_i2c_4band_data |= (frame[0] & 1) << 13;
       }
 
       /* Attenuator */
-      data |= frame[3] & 3;
+      new_i2c_4band_data |= frame[3] & 3;
 
 /*
 DG8MG: On Charly 25LC hardware C3 bit 4 is used for the switching of the second preamp
@@ -796,12 +811,13 @@ C3
 + ------------------------- Alex Rx out (0 = off, 1 = on). Set if Alex Rx Antenna > 0.
 */
       
-	  
-	  /* Activate preamp one and two as expected from the frontend software (f.e. PowerSDR Charly 25 / Hamlab Edition) */
-	  data |= frame[3] & 12;
+  
+      /* Activate preamp one and two as expected from the frontend software (f.e. PowerSDR Charly 25 / Hamlab Edition) */
+      new_i2c_4band_data |= frame[3] & 12;
+	  break;
 #endif
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
       data = (frame[4] & 0x03) << 8 | (frame[3] & 0xe0) | (frame[3] & 0x03) << 1 | (frame[0] & 0x01);
       if(alex_data_0 != data)
       {
@@ -832,9 +848,9 @@ C3
           i2c_write_data16(i2c_fd, data);
         }
       }
+      break; 
 #endif
 
-      break;
     case 2:
     case 3:
       /* set tx phase increment */
@@ -843,32 +859,33 @@ C3
 #ifdef CHARLY25LC
       if(freq < freq_min || freq > freq_max) break;
       *tx_freq = (uint32_t)floor(freq / 125.0e6 * (1 << 30) + 0.5);
-	  
-	  /* Switch LPF depending on TX frequency */
+  
+      /* Switch LPF depending on TX frequency */
       /* Cutoff frequencies aren't adjusted to actual filter curves atm, and
          roughly follow the amateur radio bands with some generous padding. Just
          like preamp settings, this should probably be configurable via web
          interface to make switching filters easier */
-      data &= 0xf0ff;
+      new_i2c_4band_data &= 0xf0ff;
       if(30000000 > freq && freq > 24500000) /* 10m LPF can be used on 12m */
       {
-        data |= 1 << 8;
+        new_i2c_4band_data |= 1 << 8;
       }
       else if(14500000 > freq && freq > 13800000)
       {
-        data |= 1 << 9;
+        new_i2c_4band_data |= 1 << 9;
       }
       else if(7500000 > freq && freq > 6800000)
       {
-        data |= 1 << 10;
+        new_i2c_4band_data |= 1 << 10;
       }
       else if(4200000 > freq && freq > 3300000)
       {
-        data |= 1 << 11;
+        new_i2c_4band_data |= 1 << 11;
       }
+	  break;
 #endif
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
       if(alex_data_1 != freq)
       {
         alex_data_1 = freq;
@@ -881,15 +898,15 @@ C3
       }
       if(freq < freq_min || freq > freq_max) break;
       *tx_freq = (uint32_t)floor(freq / 125.0e6 * (1 << 30) + 0.5);
+      break;
 #endif
 
-      break;
     case 4:
     case 5:
       /* set rx phase increment */
       freq = ntohl(*(uint32_t *)(frame + 1));
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
       if(alex_data_2 != freq)
       {
         alex_data_2 = freq;
@@ -905,7 +922,7 @@ C3
       /* set rx phase increment */
       freq = ntohl(*(uint32_t *)(frame + 1));
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
       if(alex_data_3 != freq)
       {
         alex_data_3 = freq;
@@ -932,7 +949,7 @@ C3
     case 18:
     case 19:
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
       data = (frame[2] & 0x40) << 9 | frame[4] << 8 | frame[3];
       if(alex_data_4 != data)
       {
@@ -992,8 +1009,8 @@ C3
       break;
     case 20:
     case 21:
-	
-#ifndef CHARLY25LC
+
+#ifndef CHARLY25LC_STRIPPED
       rx_att_data = frame[4] & 0x1f;
 #endif
 
@@ -1001,7 +1018,7 @@ C3
     case 22:
     case 23:
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
       cw_reversed = (frame[2] >> 6) & 1;
       cw_speed = frame[3] & 63;
       cw_mode = (frame[3] >> 6) & 3;
@@ -1012,8 +1029,8 @@ C3
       break;
     case 30:
     case 31:
-	
-#ifndef CHARLY25LC
+
+#ifndef CHARLY25LC_STRIPPED
       cw_int_data = frame[1] & 1;
       cw_delay = frame[3];
       if(i2c_codec)
@@ -1027,7 +1044,7 @@ C3
     case 32:
     case 33:
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
       cw_hang = (frame[1] << 2) | (frame[2] & 3);
       if(i2c_codec)
       {
@@ -1039,17 +1056,23 @@ C3
       break;
   }
 #ifdef CHARLY25LC
-  if (i2c_4band && data != i2c_4band_data)
+  if (i2c_4band && new_i2c_4band_data != i2c_4band_data)
   {
-    i2c_4band_data = data;
+    i2c_4band_data = new_i2c_4band_data;
     ioctl(i2c_fd, I2C_SLAVE, ADDR_4BAND);
-    i2c_write(i2c_fd, 0x02, data);
-
-	// fprintf(stderr, "4Band: %d, Band switching - i2c_write return value: %d\n", i2c_4band, i2c_write(i2c_fd, 0x02, data));
+    i2c_write(i2c_fd, 0x02, i2c_4band_data);
   }
 
-  // fprintf(stderr, "4Band: %d, I2C: %x\n", i2c_4band, i2c_4band_data);
-  // fprintf(stderr, "Switch case value (frame[0]): %d\n", frame[0]);
+#ifdef DEBUG
+  fprintf(stderr, "Frames after switch case statement:\n");
+  fprintf(stderr, "Frame[0]: %d\n", frame[0]);
+  fprintf(stderr, "Frame[1]: %d\n", frame[1]);
+  fprintf(stderr, "Frame[2]: %d\n", frame[2]);
+  fprintf(stderr, "Frame[3]: %d\n", frame[3]);
+  fprintf(stderr, "Frame[4]: %d\n", frame[4]);
+  fprintf(stderr, "i2c_4band: %d, new_i2c_4band_data: %x\n", i2c_4band, new_i2c_4band_data);
+#endif
+ 
 #endif
 }
 
@@ -1097,7 +1120,7 @@ void *handler_ep6(void *arg)
   rate_counter = 1 << rate;
   k = 0;
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
   if(i2c_codec)
   {
     /* reset codec fifo */
@@ -1118,7 +1141,7 @@ void *handler_ep6(void *arg)
     n = 504 / size;
     m = 256 / n;
 
-#ifdef CHARLY25LC
+#ifdef CHARLY25LC_STRIPPED
     if(*rx_cntr >= 8192)
     {
       /* reset rx fifo */
@@ -1127,7 +1150,7 @@ void *handler_ep6(void *arg)
     }
 #endif
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
     if((i2c_codec && *adc_cntr >= 1024) || *rx_cntr >= 8192)
     {
       if(i2c_codec)
@@ -1142,14 +1165,14 @@ void *handler_ep6(void *arg)
       *rx_rst &= ~1;
     }
 #endif
-	
+
     while(*rx_cntr < m * n * 16) usleep(1000);
 
-#ifdef CHARLY25LC
+#ifdef CHARLY25LC_STRIPPED
     if(--rate_counter == 0)
 #endif
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
     if(i2c_codec && --rate_counter == 0)
 #endif
 
@@ -1177,7 +1200,7 @@ void *handler_ep6(void *arg)
 
       memcpy(buffer[i] + 8, header + header_offset, 8);
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
       buffer[i][11] |= *gpio_in & 7;
 #endif
 
@@ -1219,7 +1242,7 @@ void *handler_ep6(void *arg)
           memcpy(buffer[i] + buffer_offset + 18, data3 + data_offset, 6);
         }
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
         if(i2c_codec) memcpy(buffer[i] + buffer_offset + size - 2, &audio[(k++) >> rate], 2);
 #endif
 
@@ -1229,7 +1252,7 @@ void *handler_ep6(void *arg)
 
       memcpy(buffer[i] + 520, header + header_offset, 8);
 
-#ifndef CHARLY25LC
+#ifndef CHARLY25LC_STRIPPED
       buffer[i][523] |= *gpio_in & 7;
 #endif
 
@@ -1270,8 +1293,8 @@ void *handler_ep6(void *arg)
         {
           memcpy(buffer[i] + buffer_offset + 18, data3 + data_offset, 6);
         }
-		
-#ifndef CHARLY25LC
+
+#ifndef CHARLY25LC_STRIPPED
         if(i2c_codec) memcpy(buffer[i] + buffer_offset + size - 2, &audio[(k++) >> rate], 2);
 #endif
 
