@@ -361,7 +361,7 @@ int main(int argc, char *argv[])
   }
   
   // Version info for debugging only!
-  fprintf(stderr, "Version 19112016: Charly 25LC / Hamlab Edition\n");
+  fprintf(stderr, "Alpha-Version 08122016: Charly 25LC / Hamlab Edition\n");
 #endif
 
 #ifndef CHARLY25LC
