@@ -3,7 +3,6 @@ lappend auto_path [pwd]
 package require TclOO
 package require oo::util
 package require BLT
-package require mcpha
 
 wm minsize . 880 680
 
@@ -25,7 +24,11 @@ namespace eval ::mcpha {
 # -------------------------------------------------------------------------
 
   proc validate {min max size value} {
-    if {![regexp -- {^-?[0-9]*$} $value]} {
+    if {[string equal $value {}]} {
+      return 1
+    } elseif {[string equal $value {-}]} {
+      return 1
+    } elseif {![regexp -- {^-?[0-9]*$} $value]} {
       return 0
     } elseif {[regexp -- {^0[0-9]+$} $value]} {
       return 0
@@ -43,7 +46,9 @@ namespace eval ::mcpha {
 # -------------------------------------------------------------------------
 
   proc doublevalidate {max value} {
-    if {![regexp -- {^[0-9]{0,2}\.?[0-9]{0,3}$} $value]} {
+    if {[string equal $value {}]} {
+      return 1
+    } elseif {![regexp -- {^[0-9]{0,2}\.?[0-9]{0,3}$} $value]} {
       return 0
     } elseif {[regexp -- {^0[0-9]+$} $value]} {
       return 0
@@ -53,6 +58,8 @@ namespace eval ::mcpha {
       return 1
     }
   }
+
+# -------------------------------------------------------------------------
 
   proc addrvalidate {value} {
     set ipnum {\d|[1-9]\d|1\d\d|2[0-4]\d|25[0-5]}
@@ -145,7 +152,7 @@ namespace eval ::mcpha {
     label ${master}.rate_label -text {Decimation factor:}
     spinbox ${master}.rate_field -from 4 -to 8192 \
       -increment 4 -width 10 -textvariable [my varname rate] \
-      -validate all -vcmd {::mcpha::validate 4 8192 4 %P}
+      -validate all -vcmd {::mcpha::validate 0 8192 4 %P}
 
     grid ${master}.addr_label ${master}.address_field ${master}.connect \
       ${master}.spc1 ${master}.rate_label ${master}.rate_field -padx 5
@@ -238,57 +245,80 @@ namespace eval ::mcpha {
 
     if {!$connected} return
 
+    if {[eof $socket]} {
+      my disconnect
+      return
+    }
+
     set buffer [format {%02x} $code][format {%01x} $chan][string range [format {%016lx} $data] 3 15]
 
-    set rc [catch {
+    if {[catch {
       puts -nonewline $socket [binary decode hex [::mcpha::reverse $buffer]]
       flush $socket
-    } result]
-
-    switch -- $rc {
-      1 {
-        puts $result
-      }
+    } result]} {
+      my disconnect
+      return
     }
   }
 
 # -------------------------------------------------------------------------
 
-  oo::define CfgDisplay method commandReadRaw {code chan size data} {
+  oo::define CfgDisplay method commandReadVec {code chan size format data} {
     my variable connected socket
 
     if {!$connected} return
 
+    if {[eof $socket]} {
+      my disconnect
+      return
+    }
+
     my command $code $chan
 
-    set rc [catch {read $socket $size} result]
-
-    switch -- $rc {
-      0 {
-        uplevel 1 [list set $data $result]
-      }
-      1 {
-        puts $result
-      }
+    if {[catch {$data binread $socket $size -format $format -at 0} result]} {
+      my disconnect
+      return
     }
   }
 
 # -------------------------------------------------------------------------
 
   oo::define CfgDisplay method commandReadHex {code chan size data} {
-    my variable connected
+    my variable connected socket
 
     if {!$connected} return
 
-    set result {}
-    my commandReadRaw $code $chan $size result
-    uplevel 1 [list set $data 0x[::mcpha::reverse [binary encode hex $result]]]
+    if {[eof $socket]} {
+      my disconnect
+      return
+    }
+
+    my command $code $chan
+
+    if {[catch {read $socket $size} result]} {
+      my disconnect
+      return
+    }
+
+    set hex [::mcpha::reverse [binary encode hex $result]]
+    if {[string length $hex] == 0} {
+      my disconnect
+      return
+    }
+
+    uplevel 1 [list set $data 0x$hex]
   }
 
 # -------------------------------------------------------------------------
 
   oo::define CfgDisplay method rate_update args {
     my variable rate
+
+    if {[string equal $rate {}]} {
+      set rate 4
+    } elseif {$rate < 4} {
+      set rate 4
+    }
 
     my command 4 0 $rate
   }
@@ -301,7 +331,6 @@ namespace eval ::mcpha {
 
   oo::define HstDisplay constructor args {
     my variable number master controller
-    my variable data
 
     foreach {param value} $args {
       if {$param eq "-number"} {
@@ -315,12 +344,10 @@ namespace eval ::mcpha {
       }
     }
 
-    set data {}
-
-    blt::vector create [my varname xvec](16384)
+    blt::vector create [my varname xvec](16385)
     blt::vector create [my varname yvec](16384)
 
-    # fill one vector for the x axis with 16384 points
+    # fill one vector for the x axis with 16385 points
     [my varname xvec] seq -0.5 16383.5
 
     my setup
@@ -335,7 +362,6 @@ namespace eval ::mcpha {
     my variable rate_val date_val
     my variable cntr_val cntr_bak cntr_old
 
-    trace add variable [my varname data] write [mymethod data_update]
     trace add variable [my varname cntr_val] write [mymethod cntr_val_update]
     trace add variable [my varname rate_val] write [mymethod rate_val_update]
 
@@ -345,12 +371,15 @@ namespace eval ::mcpha {
     trace add variable [my varname thrs] write [mymethod thrs_update]
     trace add variable [my varname thrs_min] write [mymethod thrs_update]
     trace add variable [my varname thrs_max] write [mymethod thrs_update]
+    trace add variable [my varname cntr_h] write [mymethod cntr_update]
+    trace add variable [my varname cntr_m] write [mymethod cntr_update]
+    trace add variable [my varname cntr_s] write [mymethod cntr_update]
 
     ${config}.axis_check select
 
     ${config}.thrs_check select
-    ${config}.thrs_frame.min_field set 50
-    ${config}.thrs_frame.max_field set 16380
+    ${config}.thrs_frame.min_field set 300
+    ${config}.thrs_frame.max_field set 16300
 
     set xmin_val 0
     set xmax_val 16383
@@ -679,13 +708,21 @@ namespace eval ::mcpha {
 # -------------------------------------------------------------------------
 
   oo::define HstDisplay method base_val_update args {
-    my variable controller number base_typ base_val
+    my variable controller number base_val
 
     if {[string equal $base_val {}]} {
       set base_val 0
     }
 
     $controller command 6 $number $base_val
+  }
+
+# -------------------------------------------------------------------------
+
+  oo::define HstDisplay method delay_update args {
+    my variable controller number
+
+    $controller command 7 $number 100
   }
 
 # -------------------------------------------------------------------------
@@ -722,6 +759,24 @@ namespace eval ::mcpha {
 
 # -------------------------------------------------------------------------
 
+  oo::define HstDisplay method cntr_update args {
+    my variable cntr_h cntr_m cntr_s
+
+    if {[string equal $cntr_h {}]} {
+      set cntr_h 0
+    }
+
+    if {[string equal $cntr_m {}]} {
+      set cntr_m 0
+    }
+
+    if {[string equal $cntr_s {}]} {
+      set cntr_s 0
+    }
+  }
+
+# -------------------------------------------------------------------------
+
   oo::define HstDisplay method stat_update {} {
     my variable config graph xmin_val xmax_val
     set ymin_val [[my varname yvec] index $xmin_val]
@@ -731,7 +786,7 @@ namespace eval ::mcpha {
     ${config}.roi_frame.max_value configure -text $xmax_val
 
     ${config}.stat_frame.tot_value configure \
-      -text [mcpha::integrateBlt [my varname yvec] $xmin_val $xmax_val 0]
+      -text [blt::vector expr "sum([my varname yvec]($xmin_val:$xmax_val))"]
 
     ${config}.stat_frame.bkg_value configure \
       -text [expr {($xmax_val - $xmin_val + 1) * ($ymin_val + $ymax_val) / 2.0}]
@@ -788,9 +843,9 @@ namespace eval ::mcpha {
   oo::define HstDisplay method cntr_setup {} {
     my variable controller number cntr_val
 
-    # send counter value
     $controller command 10 $number $cntr_val
-  }
+    $controller command 0 $number
+ }
 
 # -------------------------------------------------------------------------
 
@@ -804,7 +859,6 @@ namespace eval ::mcpha {
     $controller command 1 $number
 
     set cntr_val $cntr_bak
-    my cntr_setup
 
     set cntr_old $cntr_bak
     set yvec_bak 0.0
@@ -872,8 +926,13 @@ namespace eval ::mcpha {
       set cntr_val $cntr_tmp
       set cntr_bak $cntr_tmp
       set cntr_old $cntr_tmp
-      set yvec_bak [mcpha::integrateBlt [my varname yvec] 0 16383 0]
+      set yvec_bak [blt::vector expr "sum([my varname yvec](0:16383))"]
       set yvec_old $yvec_bak
+
+      my base_update
+      my base_val_update
+      my delay_update
+      my thrs_update
 
       my cntr_setup
 
@@ -902,7 +961,9 @@ namespace eval ::mcpha {
 
     my base_update
     my base_val_update
+    my delay_update
     my thrs_update
+
     $controller command 11 $number 1
 
     set auto 1
@@ -922,13 +983,6 @@ namespace eval ::mcpha {
     set auto 0
 
     after cancel $after
-  }
-
-# -------------------------------------------------------------------------
-
-  oo::define HstDisplay method data_update args {
-    my variable data
-    mcpha::convertBlt $data 4 [my varname yvec]
   }
 
 # -------------------------------------------------------------------------
@@ -958,14 +1012,14 @@ namespace eval ::mcpha {
     $controller commandReadHex 12 $number 8 result
 
     if {[string length $result] == 0} {
-      set result 0
+      return
     }
 
-    set cntr_val $result
-    set cntr_new $result
+    set cntr_new [expr {$cntr_bak - $result}]
+    catch {set cntr_val $cntr_new}
 
-    $controller commandReadRaw 13 $number [expr {$size * 4}] [my varname data]
-    set yvec_new [mcpha::integrateBlt [my varname yvec] 0 16383 0]
+    $controller commandReadVec 13 $number $size u4 [my varname yvec]
+    set yvec_new [blt::vector expr "sum([my varname yvec](0:16383))"]
 
     if {$cntr_new < $cntr_old} {
       set rate_val(inst) [expr {($yvec_new - $yvec_old)*125000000/($cntr_old - $cntr_new)}]
@@ -1066,7 +1120,7 @@ namespace eval ::mcpha {
   oo::define HstDisplay method recover {} {
     my variable config
     my open_data
-    ${config}.chan_frame.entr_value configure -text [mcpha::integrateBlt [my varname yvec] 0 16383 0]
+    ${config}.chan_frame.entr_value configure -text [blt::vector expr "sum([my varname yvec](0:16383))"]
     my stat_update
   }
 
@@ -1090,14 +1144,14 @@ namespace eval ::mcpha {
       }
     }
 
-    set data {}
-
     set sequence 0
 
-    set xvec [blt::vector create #auto(50000)]
+    set xvec [blt::vector create #auto(50001)]
 
-    for {set i 1} {$i <= 9} {incr i} {
-      dict set yvec $i [blt::vector create #auto(50000)]
+    set data [blt::vector create #auto(131072)]
+
+    for {set i 1} {$i <= 2} {incr i} {
+      dict set yvec $i [blt::vector create #auto(65536)]
     }
 
     # fill one vector for the x axis
@@ -1114,8 +1168,6 @@ namespace eval ::mcpha {
     set directory $::env(HOME)
 
     trace add variable [my varname chan] write [mymethod chan_update]
-
-    trace add variable [my varname data] write [mymethod data_update]
 
     trace add variable [my varname auto] write [mymethod auto_update]
 
@@ -1310,9 +1362,11 @@ namespace eval ::mcpha {
 
   oo::define OscDisplay method recs_val_update args {
     my variable recs_val recs_bak
+
     if {[string equal $recs_val {}]} {
       set recs_val 0
     }
+
     set recs_bak $recs_val
   }
 
@@ -1364,28 +1418,11 @@ namespace eval ::mcpha {
   oo::define OscDisplay method level_update args {
     my variable controller level
 
+    if {[string equal $level {}]} {
+      set level 0
+    }
+
     $controller command 17 0 $level
-  }
-
-# -------------------------------------------------------------------------
-
-  oo::define OscDisplay method data_update args {
-    my variable data yvec
-    my variable graph chan waiting sequence auto
-
-    mcpha::convertOsc $data $yvec
-
-    foreach {key value} [array get chan] {
-      $graph pen configure pen${key} -dashes 0
-    }
-
-    set waiting 0
-
-    if {$sequence} {
-      my sequence_register
-    } elseif {$auto} {
-      after 1000 [mymethod acquire_start]
-    }
   }
 
 # -------------------------------------------------------------------------
@@ -1416,7 +1453,8 @@ namespace eval ::mcpha {
 # -------------------------------------------------------------------------
 
   oo::define OscDisplay method acquire_loop {} {
-    my variable controller waiting auto
+    my variable controller graph chan waiting sequence auto
+    my variable data yvec
 
     set size 65536
 
@@ -1430,7 +1468,23 @@ namespace eval ::mcpha {
     }
 
     if {$status == 0} {
-      $controller commandReadRaw 22 0 [expr {$size * 4}] [my varname data]
+      $controller commandReadVec 22 0 [expr {$size * 2}] i2 $data
+      $data split tmp1 tmp2
+      [dict get $yvec 1] set tmp1
+      [dict get $yvec 2] set tmp2
+      blt::vector destroy tmp1 tmp2
+
+      foreach {key value} [array get chan] {
+        $graph pen configure pen${key} -dashes 0
+      }
+
+      set waiting 0
+
+      if {$sequence} {
+        my sequence_register
+      } elseif {$auto} {
+        after 1000 [mymethod acquire_start]
+      }
     }
 
     if {$waiting} {
@@ -1555,7 +1609,7 @@ namespace eval ::mcpha {
     set directory [tk_chooseDirectory -initialdir $directory -title {Choose a directory}]
 
     if {[string equal $directory {}]} {
-     return
+      return
     }
 
     ${config}.recs_field configure -state disabled
@@ -1619,25 +1673,33 @@ namespace eval ::mcpha {
 set config [frame .config]
 
 mcpha::CfgDisplay create cfg -master $config
-set notebook [blt::tabnotebook .notebook -borderwidth 1 -selectforeground black -side bottom]
+
+if { [catch {blt::tabnotebook .notebook -borderwidth 1 -selectforeground black -side bottom} notebook] } {
+  set notebook [ttk::notebook .notebook]
+  set frame_1 [frame ${notebook}.hst_1]
+  set frame_2 [frame ${notebook}.hst_2]
+  set frame_3 [frame ${notebook}.osc]
+  $notebook add $frame_1 -text "Spectrum histogram 1"
+  $notebook add $frame_2 -text "Spectrum histogram 2"
+  $notebook add $frame_3 -text "Oscilloscope"
+} else {
+  set frame_1 [frame ${notebook}.hst_1]
+  set frame_2 [frame ${notebook}.hst_2]
+  set frame_3 [frame ${notebook}.osc]
+  $notebook insert end -text "Spectrum histogram 1" -window $frame_1 -fill both
+  $notebook insert end -text "Spectrum histogram 2" -window $frame_2 -fill both
+  $notebook insert end -text "Oscilloscope" -window $frame_3 -fill both
+}
+
+mcpha::HstDisplay create hst_0 -number 0 -master $frame_1 -controller cfg
+mcpha::HstDisplay create hst_1 -number 1 -master $frame_2 -controller cfg
+mcpha::OscDisplay create osc -master $frame_3 -controller cfg
 
 grid ${config} -row 0 -column 0 -sticky news -pady 5
 grid ${notebook} -row 1 -column 0 -sticky news
 
 grid rowconfigure . 1 -weight 1
 grid columnconfigure . 0 -weight 1
-
-set window [frame ${notebook}.hst_0]
-$notebook insert end -text "Spectrum histogram 1" -window $window -fill both
-mcpha::HstDisplay create hst_0 -number 0 -master $window -controller cfg
-
-set window [frame ${notebook}.hst_1]
-$notebook insert end -text "Spectrum histogram 2" -window $window -fill both
-mcpha::HstDisplay create hst_1 -number 1 -master $window -controller cfg
-
-set window [frame ${notebook}.osc]
-$notebook insert end -text "Oscilloscope" -window $window -fill both
-mcpha::OscDisplay create osc -master $window -controller cfg
 
 update
 

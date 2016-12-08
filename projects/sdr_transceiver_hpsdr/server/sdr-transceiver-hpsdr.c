@@ -5,11 +5,14 @@
 02.09.2016 ON3VNA: add code for TX level switching via DS1803-10 (I2C).
 21.09.2016 DC2PD: add code for controlling AD8331 VGA with MCP4725 DAC (I2C).
 02.10.2016 DL9LJ: add code for controlling ICOM IC-735 (UART).
+03.12.2016 KA6S: add CW keyer code.
 */
-/* 03.10.2016 DL8GM and DG8MG: Modified code for Charly 25 - 4 band transceiver board switching via I2C.
+/*
+03.10.2016 DL8GM and DG8MG: Modified code for Charly 25 - 4 band transceiver board switching via I2C.
 11.10.2016 DG8MG: Modified code for band independent switching of the two preamps on the Charly 25 LC board.
 15.11.2016 DG8MG: Modified code to make it compatible with Pavel Demin's commit: https://github.com/pavel-demin/red-pitaya-notes/commit/e6bcfe06d8e7f9191cce2b8f7463f82f81b0d3b0
 19.11.2016 DG8MG: Changed LPF frequency ranges to cover the IARU region 1-3 band plan requirements.
+08.12.2016 DG8MG: Modified code to make it compatible with Pavel Demin's commit: https://github.com/pavel-demin/red-pitaya-notes/commit/b478ace697b260edab1a2de4eb4e38ccfdbc5d18
 */
 
 // DG8MG
@@ -45,8 +48,6 @@
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <linux/i2c-dev.h>
-
-#include "jack/ringbuffer.c"
 
 
 #define I2C_SLAVE       0x0703 /* Use this slave address */
@@ -90,9 +91,7 @@ int active_thread = 0;
 
 void process_ep2(uint8_t *frame);
 void *handler_ep6(void *arg);
-void *handler_playback(void *arg);
-
-jack_ringbuffer_t *playback_data = 0;
+void *handler_keyer(void *arg);
 
 #ifndef CHARLY25LC_STRIPPED
 /* variables to handle I2C devices */
@@ -114,13 +113,26 @@ uint16_t i2c_dac1_data = 0xfff;
 
 uint8_t i2c_boost_data = 0;
 
+uint8_t dac_mux_data = 0;
+uint8_t dac_level_data = 0;
+
 uint8_t cw_int_data = 0;
 #endif
 
-uint8_t cw_mux_data = 0;
-
 #ifndef CHARLY25LC_STRIPPED
 uint8_t rx_att_data = 0;
+uint8_t tx_mux_data = 0;
+
+uint16_t cw_hang = 0;
+uint8_t cw_reversed = 0;
+uint8_t cw_speed = 25;
+uint8_t cw_mode = 0;
+uint8_t cw_weight = 50;
+uint8_t cw_spacing = 0;
+uint8_t cw_delay = 0;
+
+int cw_memory[2] = {0, 0};
+int cw_ptt_delay = 0;
 
 ssize_t i2c_write_addr_data8(int fd, uint8_t addr, uint8_t data)
 {
@@ -287,6 +299,8 @@ ssize_t i2c_write(int fd, uint8_t addr, uint16_t data)
 int main(int argc, char *argv[])
 {
   int fd, i, j, size;
+  struct sched_param param;
+  pthread_attr_t attr;
   pthread_t thread;
   volatile void *cfg, *sts;
   volatile int32_t *tx_ramp, *dac_ramp;
@@ -298,10 +312,11 @@ int main(int argc, char *argv[])
   struct termios tty;
   struct ifreq hwaddr;
   struct sockaddr_in addr_ep2, addr_from[10];
-  uint8_t buffer[10][1032];
-  struct iovec iovec[10][1];
-  struct mmsghdr datagram[10];
-  struct timespec timeout;
+  uint8_t buffer[8][1032];
+  struct iovec iovec[8][1];
+  struct mmsghdr datagram[8];
+  struct timeval tv;
+  struct timespec ts;
   int yes = 1;
 
   if((fd = open("/dev/mem", O_RDWR)) < 0)
@@ -517,26 +532,22 @@ int main(int argc, char *argv[])
   *tx_level = 32767;
 
   /* set default tx mux channel */
-  *(tx_mux + 16) = 0;
-  *tx_mux = 2;
+  tx_mux[16] = 0;
+  tx_mux[0] = 2;
 
-  /* reset tx fifo */
-  *tx_rst |= 1;
-  *tx_rst &= ~1;
 
 #ifndef CHARLY25LC_STRIPPED
-  /* disable tx keyer */
-  *tx_rst &= ~2;
+  /* reset tx and codec DAC fifo */
+  *tx_rst |= 3;
+  *tx_rst &= ~3;
 
   if(i2c_codec)
   {
-    /* reset codec fifo */
-    *codec_rst |= 3;
-    *codec_rst &= ~3;
-    /* disable codec keyer */
-    *codec_rst &= ~4;
+    /* reset codec ADC fifo */
+    *codec_rst |= 1;
+    *codec_rst &= ~1;
     /* enable I2S interface */
-    *codec_rst &= ~8;
+    *codec_rst &= ~2;
 
     /* set default dac phase increment */
     *dac_freq = (uint32_t)floor(600 / 48.0e3 * (1 << 30) + 0.5);
@@ -559,8 +570,8 @@ int main(int argc, char *argv[])
     *dac_level = 32767;
 
     /* set default dac mux channel */
-    *(dac_mux + 16) = 0;
-    *dac_mux = 2;
+    dac_mux[16] = 0;
+    dac_mux[0] = 2;
   }
   else
 #endif
@@ -569,17 +580,8 @@ int main(int argc, char *argv[])
 
 #ifndef CHARLY25LC_STRIPPED
     /* enable ALEX interface */
-    *codec_rst |= 8;
+    *codec_rst |= 2;
 #endif
-
-    /* create playback thread */
-    playback_data = jack_ringbuffer_create(4096);
-    if(pthread_create(&thread, NULL, handler_playback, NULL) < 0)
-    {
-      perror("pthread_create");
-      return EXIT_FAILURE;
-    }
-    pthread_detach(thread);
   }
 
   if((sock_ep2 = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
@@ -594,6 +596,10 @@ int main(int argc, char *argv[])
 
   setsockopt(sock_ep2, SOL_SOCKET, SO_REUSEADDR, (void *)&yes , sizeof(yes));
 
+  tv.tv_sec = 0;
+  tv.tv_usec = 1000;
+  setsockopt(sock_ep2, SOL_SOCKET, SO_RCVTIMEO, (void *)&tv , sizeof(tv));
+
   memset(&addr_ep2, 0, sizeof(addr_ep2));
   addr_ep2.sin_family = AF_INET;
   addr_ep2.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -605,12 +611,24 @@ int main(int argc, char *argv[])
     return EXIT_FAILURE;
   }
 
+  pthread_attr_init(&attr);
+  pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+  pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
+  param.sched_priority = 99;
+  pthread_attr_setschedparam(&attr, &param);
+  if(pthread_create(&thread, &attr, handler_keyer, NULL) < 0)
+  {
+    perror("pthread_create");
+    return EXIT_FAILURE;
+  }
+  pthread_detach(thread);
+
   while(1)
   {
     memset(iovec, 0, sizeof(iovec));
     memset(datagram, 0, sizeof(datagram));
 
-    for(i = 0; i < 10; ++i)
+    for(i = 0; i < 8; ++i)
     {
       memcpy(buffer[i], id, 4);
       iovec[i][0].iov_base = buffer[i];
@@ -621,11 +639,11 @@ int main(int argc, char *argv[])
       datagram[i].msg_hdr.msg_namelen = sizeof(addr_from[i]);
     }
 
-    timeout.tv_sec = 0;
-    timeout.tv_nsec = 1000000;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 1000000;
 
-    size = recvmmsg(sock_ep2, datagram, 10, 0, &timeout);
-    if(size < 0)
+    size = recvmmsg(sock_ep2, datagram, 8, 0, &ts);
+    if(size < 0 && errno != EAGAIN)
     {
       perror("recvfrom");
       return EXIT_FAILURE;
@@ -642,7 +660,7 @@ int main(int argc, char *argv[])
       switch(code)
       {
         case 0x0201feef:
-          if(!cw_mux_data)
+          if(!tx_mux_data)
           {
             while(*tx_cntr > 1922) usleep(1000);
             if(*tx_cntr == 0) for(j = 0; j < 1260; ++j) *tx_data = 0;
@@ -660,7 +678,7 @@ int main(int argc, char *argv[])
 #ifndef CHARLY25LC_STRIPPED
           if(i2c_codec)
           {
-            if(!cw_mux_data)
+            if(!dac_mux_data)
             {
               while(*dac_cntr > 898) usleep(1000);
               if(*dac_cntr == 0) for(j = 0; j < 504; ++j) *dac_data = 0;
@@ -717,8 +735,6 @@ void process_ep2(uint8_t *frame)
 {
   uint32_t freq, c25lc_freq;
   uint16_t data;
-  uint16_t cw_hang;
-  uint8_t cw_reversed, cw_speed, cw_mode, cw_weight, cw_spacing, cw_delay;
   uint8_t ptt, preamp, att, boost;
 
 #ifdef CHARLY25LC
@@ -740,30 +756,7 @@ void process_ep2(uint8_t *frame)
       preamp = ptt | (*gpio_in & 1) ? 0 : (frame[3] & 0x04) >> 2 | (rx_att_data == 0);
       *gpio_out = (frame[2] & 0x1e) << 3 | att << 2 | preamp << 1 | ptt;
 
-      data =  (ptt | (*gpio_in & 1)) & cw_int_data;
-      if(cw_mux_data != data)
-      {
-        cw_mux_data = data;
-        if(data == 0)
-        {
-          *tx_rst &= ~2;
-          *codec_rst &= ~4;
-        }
-        else
-        {
-          *tx_rst |= 2;
-          *codec_rst |= 4;
-        }
-        *(tx_mux + 16) = data;
-        *tx_mux = 2;
-        if(i2c_codec)
-        {
-          *(dac_mux + 16) = data;
-          *dac_mux = 2;
-        }
-      }
 #endif
-
       /* set rx sample rate */
       rate = frame[1] & 3;
       switch(frame[1] & 3)
@@ -1036,10 +1029,11 @@ C3
 
 #ifndef CHARLY25LC_STRIPPED
       cw_int_data = frame[1] & 1;
+      dac_level_data = frame[2];
       cw_delay = frame[3];
       if(i2c_codec)
       {
-        data = frame[2];
+        data = dac_level_data;
         *dac_level = (data + 1) * 256 - 1;
       }
 #endif
@@ -1084,7 +1078,7 @@ C3
 void *handler_ep6(void *arg)
 {
   int i, j, k, m, n, size, rate_counter;
-  int data_offset, header_offset, buffer_offset;
+  int data_offset, header_offset;
   uint32_t counter;
   int32_t value;
   uint16_t audio[512];
@@ -1092,7 +1086,8 @@ void *handler_ep6(void *arg)
   uint8_t data1[4096];
   uint8_t data2[4096];
   uint8_t data3[4096];
-  uint8_t buffer[25][1032];
+  uint8_t buffer[25 * 1032];
+  uint8_t *pointer;
   struct iovec iovec[25][1];
   struct mmsghdr datagram[25];
   uint8_t id[4] = {0xef, 0xfe, 1, 6};
@@ -1111,8 +1106,8 @@ void *handler_ep6(void *arg)
 
   for(i = 0; i < 25; ++i)
   {
-    memcpy(buffer[i], id, 4);
-    iovec[i][0].iov_base = buffer[i];
+    memcpy(buffer + i * 1032, id, 4);
+    iovec[i][0].iov_base = buffer + i * 1032;
     iovec[i][0].iov_len = 1032;
     datagram[i].msg_hdr.msg_iov = iovec[i];
     datagram[i].msg_hdr.msg_iovlen = 1;
@@ -1128,9 +1123,9 @@ void *handler_ep6(void *arg)
 #ifndef CHARLY25LC_STRIPPED
   if(i2c_codec)
   {
-    /* reset codec fifo */
-    *codec_rst |= 2;
-    *codec_rst &= ~2;
+    /* reset codec ADC fifo */
+    *codec_rst |= 1;
+    *codec_rst &= ~1;
   }
 #endif
   
@@ -1160,9 +1155,9 @@ void *handler_ep6(void *arg)
     {
       if(i2c_codec)
       {
-        /* reset codec fifo */
-        *codec_rst |= 2;
-        *codec_rst &= ~2;
+        /* reset codec ADC fifo */
+        *codec_rst |= 1;
+        *codec_rst &= ~1;
       }
 
       /* reset rx fifo */
@@ -1201,113 +1196,64 @@ void *handler_ep6(void *arg)
     data_offset = 0;
     for(i = 0; i < m; ++i)
     {
-      *(uint32_t *)(buffer[i] + 4) = htonl(counter);
-
-      memcpy(buffer[i] + 8, header + header_offset, 8);
-
-#ifndef CHARLY25LC_STRIPPED
-      buffer[i][11] |= *gpio_in & 7;
-#endif
-
-      if(header_offset == 8)
-      {
-        value = xadc[153] >> 3;
-        buffer[i][12] = (value >> 8) & 0xff;
-        buffer[i][13] = value & 0xff;
-        value = xadc[152] >> 3;
-        buffer[i][14] = (value >> 8) & 0xff;
-        buffer[i][15] = value & 0xff;
-      }
-      else if(header_offset == 16)
-      {
-        value = xadc[144] >> 3;
-        buffer[i][12] = (value >> 8) & 0xff;
-        buffer[i][13] = value & 0xff;
-        value = xadc[145] >> 3;
-        buffer[i][14] = (value >> 8) & 0xff;
-        buffer[i][15] = value & 0xff;
-      }
-      header_offset = header_offset >= 32 ? 0 : header_offset + 8;
-      memset(buffer[i] + 16, 0, 504);
-
-      buffer_offset = 16;
-      for(j = 0; j < n; ++j)
-      {
-        memcpy(buffer[i] + buffer_offset, data0 + data_offset, 6);
-        if(size > 8)
-        {
-          memcpy(buffer[i] + buffer_offset + 6, data1 + data_offset, 6);
-        }
-        if(size > 14)
-        {
-          memcpy(buffer[i] + buffer_offset + 12, data2 + data_offset, 6);
-        }
-        if(size > 20)
-        {
-          memcpy(buffer[i] + buffer_offset + 18, data3 + data_offset, 6);
-        }
-
-#ifndef CHARLY25LC_STRIPPED
-        if(i2c_codec) memcpy(buffer[i] + buffer_offset + size - 2, &audio[(k++) >> rate], 2);
-#endif
-
-        data_offset += 8;
-        buffer_offset += size;
-      }
-
-      memcpy(buffer[i] + 520, header + header_offset, 8);
-
-#ifndef CHARLY25LC_STRIPPED
-      buffer[i][523] |= *gpio_in & 7;
-#endif
-
-      if(header_offset == 8)
-      {
-        value = xadc[153] >> 3;
-        buffer[i][524] = (value >> 8) & 0xff;
-        buffer[i][525] = value & 0xff;
-        value = xadc[152] >> 3;
-        buffer[i][526] = (value >> 8) & 0xff;
-        buffer[i][527] = value & 0xff;
-      }
-      else if(header_offset == 16)
-      {
-        value = xadc[144] >> 3;
-        buffer[i][524] = (value >> 8) & 0xff;
-        buffer[i][525] = value & 0xff;
-        value = xadc[145] >> 3;
-        buffer[i][526] = (value >> 8) & 0xff;
-        buffer[i][527] = value & 0xff;
-      }
-      header_offset = header_offset >= 32 ? 0 : header_offset + 8;
-      memset(buffer[i] + 528, 0, 504);
-
-      buffer_offset = 528;
-      for(j = 0; j < n; ++j)
-      {
-        memcpy(buffer[i] + buffer_offset, data0 + data_offset, 6);
-        if(size > 8)
-        {
-          memcpy(buffer[i] + buffer_offset + 6, data1 + data_offset, 6);
-        }
-        if(size > 14)
-        {
-          memcpy(buffer[i] + buffer_offset + 12, data2 + data_offset, 6);
-        }
-        if(size > 20)
-        {
-          memcpy(buffer[i] + buffer_offset + 18, data3 + data_offset, 6);
-        }
-
-#ifndef CHARLY25LC_STRIPPED
-        if(i2c_codec) memcpy(buffer[i] + buffer_offset + size - 2, &audio[(k++) >> rate], 2);
-#endif
-
-        data_offset += 8;
-        buffer_offset += size;
-      }
-
+      *(uint32_t *)(buffer + i * 1032 + 4) = htonl(counter);
       ++counter;
+    }
+
+    for(i = 0; i < m * 2; ++i)
+    {
+      pointer = buffer + i * 516 - i % 2 * 4 + 8;
+      memcpy(pointer, header + header_offset, 8);
+#ifndef CHARLY25LC_STRIPPED
+      pointer[3] |= *gpio_in & 7;
+#endif
+
+      if(header_offset == 8)
+      {
+        value = xadc[153] >> 3;
+        pointer[4] = (value >> 8) & 0xff;
+        pointer[5] = value & 0xff;
+        value = xadc[152] >> 3;
+        pointer[6] = (value >> 8) & 0xff;
+        pointer[7] = value & 0xff;
+      }
+      else if(header_offset == 16)
+      {
+        value = xadc[144] >> 3;
+        pointer[4] = (value >> 8) & 0xff;
+        pointer[5] = value & 0xff;
+        value = xadc[145] >> 3;
+        pointer[6] = (value >> 8) & 0xff;
+        pointer[7] = value & 0xff;
+      }
+      header_offset = header_offset >= 32 ? 0 : header_offset + 8;
+
+      pointer += 8;
+      memset(pointer, 0, 504);
+      for(j = 0; j < n; ++j)
+      {
+        memcpy(pointer, data0 + data_offset, 6);
+        if(size > 8)
+        {
+          memcpy(pointer + 6, data1 + data_offset, 6);
+        }
+        if(size > 14)
+        {
+          memcpy(pointer + 12, data2 + data_offset, 6);
+        }
+        if(size > 20)
+        {
+          memcpy(pointer + 18, data3 + data_offset, 6);
+        }
+
+
+        data_offset += 8;
+        pointer += size;
+#ifndef CHARLY25LC_STRIPPED
+        if(i2c_codec) memcpy(pointer - 2, &audio[(k++) >> rate], 2);
+#endif
+      }
+
     }
 
     sendmmsg(sock_ep2, datagram, m, 0);
@@ -1318,15 +1264,160 @@ void *handler_ep6(void *arg)
   return NULL;
 }
 
-void *handler_playback(void *arg)
+inline int cw_input()
 {
-  uint8_t buffer[2048];
+  int input = (*gpio_in >> 1) & 3;
+  if(cw_reversed) input = (input & 1) << 1 | input >> 1;
+  return input;
+}
+
+inline void cw_on()
+{
+  int delay = 1200 / cw_speed;
+  if(cw_delay < delay) delay = cw_delay;
+  *tx_rst |= 16; /* PTT on */
+  tx_mux[16] = 1;
+  tx_mux[0] = 2;
+  tx_mux_data = 1;
+  if(i2c_codec && dac_level_data > 0)
+  {
+    dac_mux[16] = 1;
+    dac_mux[0] = 2;
+    dac_mux_data = 1;
+    *tx_rst |= 8; /* sidetone on */
+  }
+  while(delay--)
+  {
+    usleep(1000);
+    cw_memory[0] = cw_input();
+    if(cw_mode == 1 && !cw_memory[0]) cw_memory[1] = 0;
+    else cw_memory[1] |= cw_memory[0];
+  }
+  *tx_rst |= 4; /* RF on */
+}
+
+inline void cw_off()
+{
+  int delay = 1200 / cw_speed;
+  if(cw_delay < delay) delay = cw_delay;
+  if(i2c_codec && dac_mux_data)
+  {
+    *tx_rst &= ~8; /* sidetone off */
+  }
+  while(delay--)
+  {
+    usleep(1000);
+    cw_memory[0] = cw_input();
+    cw_memory[1] |= cw_memory[0];
+  }
+  *tx_rst &= ~4; /* RF off */
+  cw_ptt_delay = cw_hang > 0 ? cw_hang : 10;
+}
+
+inline void cw_ptt_off()
+{
+  if(--cw_ptt_delay > 0) return;
+  *tx_rst &= ~16; /* PTT off */
+  /* reset tx fifo */
+  *tx_rst |= 1;
+  *tx_rst &= ~1;
+  tx_mux[16] = 0;
+  tx_mux[0] = 2;
+  tx_mux_data = 0;
+  if(i2c_codec && dac_mux_data)
+  {
+    /* reset codec DAC fifo */
+    *tx_rst |= 2;
+    *tx_rst &= ~2;
+    dac_mux[16] = 0;
+    dac_mux[0] = 2;
+    dac_mux_data = 0;
+  }
+}
+
+inline void cw_signal_delay(int code)
+{
+  int delay = code ? 1200 / cw_speed : 3600 * cw_weight / (50 * cw_speed);
+  delay -= cw_delay;
+  if(delay < 0) delay = 0;
+  while(delay--)
+  {
+    usleep(1000);
+    cw_memory[0] = cw_input();
+    if(cw_mode == 1 && !cw_memory[0]) cw_memory[1] = 0;
+    else cw_memory[1] |= cw_memory[0];
+  }
+}
+
+inline void cw_space_delay(int code)
+{
+  int delay = code ? 1200 / cw_speed - cw_delay : 2400 / cw_speed;
+  if(delay < 0) delay = 0;
+  while(delay--)
+  {
+    usleep(1000);
+    if(tx_mux_data) cw_ptt_off();
+    cw_memory[0] = cw_input();
+    cw_memory[1] |= cw_memory[0];
+  }
+}
+
+void *handler_keyer(void *arg)
+{
+  int state, delay;
 
   while(1)
   {
-    while(jack_ringbuffer_read_space(playback_data) < 2048) usleep(1000);
-    jack_ringbuffer_read(playback_data, buffer, 2048);
-    write(1, buffer, 2048);
+    usleep(1000);
+    if(tx_mux_data) cw_ptt_off();
+    cw_memory[0] = cw_input();
+
+    if(cw_mode == 0)
+    {
+      if(cw_memory[0] & 1) cw_on();
+      else if(cw_memory[0] & 2)
+      {
+        cw_on();
+        delay = 1200 / cw_speed - cw_delay;
+        if(delay > 0) usleep(delay * 1000);
+        cw_off();
+        cw_space_delay(1);
+      }
+      else if(tx_mux_data) cw_off();
+    }
+    else if(cw_memory[0])
+    {
+      state = 1;
+      cw_memory[1] = cw_memory[0];
+      while(1)
+      {
+        if(cw_memory[1] & (1 << state))
+        {
+          cw_memory[1] = 0;
+          cw_on();
+          cw_signal_delay(state);
+          cw_off();
+          cw_space_delay(1);
+          cw_memory[1] &= ~(1 << state);
+          cw_memory[1] |= cw_memory[0];
+        }
+        if(cw_memory[1])
+        {
+          state ^= 1;
+        }
+        else
+        {
+          if(cw_spacing)
+          {
+            state = 1;
+            cw_space_delay(0);
+            if(cw_memory[1]) continue;
+          }
+          break;
+        }
+      }
+    }
   }
+
   return NULL;
 }
