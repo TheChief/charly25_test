@@ -23,7 +23,7 @@
 // Define CHARLY25LC_STRIPPED together with CHARLY25LC for Charly 25LC specific builds without extentions - this may lead to broken code!!!
 // #define CHARLY25LC_STRIPPED 1
 
-// Define CHARLY25LC_HAMLAB together with CHARLY25LC for Hamlab specific builds
+// Define CHARLY25LC_HAMLAB together with CHARLY25LC for HAMlab specific builds
 #define CHARLY25LC_HAMLAB 1
 
 // Define DEBUG for debug messages
@@ -399,7 +399,7 @@ int main(int argc, char *argv[])
   }
   
   // Version info for debugging only!
-  fprintf(stderr, "Alpha-Version 08122016: Charly 25LC / Hamlab Edition\n");
+  fprintf(stderr, "Alpha-Version 12122016: Charly 25LC / HAMlab Edition\n");
 #endif
 
 #ifndef CHARLY25LC
@@ -845,7 +845,7 @@ C3
 */
       
   
-      /* Activate preamp one and two as expected from the frontend software (f.e. PowerSDR Charly 25 / Hamlab Edition) */
+      /* Activate preamp one and two as expected from the frontend software (f.e. PowerSDR Charly 25 / HAMlab Edition) */
       new_i2c_4band_data |= frame[3] & 12;
       break;
 #endif
