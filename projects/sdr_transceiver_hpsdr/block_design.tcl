@@ -123,7 +123,7 @@ cell pavel-demin:user:gpio_debouncer:1.0 gpio_0 {
 
 # Create util_vector_logic
 cell xilinx.com:ip:util_vector_logic:2.0 not_0 {
-  C_SIZE 4
+  C_SIZE 3
   C_OPERATION not
 } {
   Op1 gpio_0/deb_data
@@ -160,7 +160,7 @@ cell xilinx.com:ip:util_vector_logic:2.0 or_0 {
 
 # Create util_vector_logic
 cell xilinx.com:ip:util_vector_logic:2.0 or_1 {
-  C_SIZE 8
+  C_SIZE 1
   C_OPERATION or
 } {
   Op1 out_slice_0/Dout
@@ -341,7 +341,7 @@ cell xilinx.com:ip:xlconcat:2.1 concat_0 {
   IN3_WIDTH 16
   IN4_WIDTH 16
   IN5_WIDTH 16
-  IN6_WIDTH 4
+  IN6_WIDTH 3
 } {
   In0 const_1/dout
   In1 dna_0/dna_data

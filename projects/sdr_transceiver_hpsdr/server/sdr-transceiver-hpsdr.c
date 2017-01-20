@@ -1075,6 +1075,7 @@ C3
       break;
     case 22:
     case 23:
+
 #ifndef CHARLY25LC_STRIPPED
       if(i2c_misc)
       {
