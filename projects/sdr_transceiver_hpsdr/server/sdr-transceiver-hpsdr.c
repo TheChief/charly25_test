@@ -9,11 +9,13 @@
 */
 /*
 03.10.2016 DL8GM and DG8MG: Modified code for Charly 25 - 4 band transceiver board switching via I2C.
-11.10.2016 DG8MG: Modified code for band independent switching of the two preamps on the Charly 25 LC board.
+11.10.2016 DG8MG: Modified code for band independent switching of the two preamps on the Charly 25LC board.
 15.11.2016 DG8MG: Modified code to make it compatible with Pavel Demin's commit: https://github.com/pavel-demin/red-pitaya-notes/commit/e6bcfe06d8e7f9191cce2b8f7463f82f81b0d3b0
 19.11.2016 DG8MG: Changed LPF frequency ranges to cover the IARU region 1-3 band plan requirements.
 08.12.2016 DG8MG: Modified code to make it compatible with Pavel Demin's commit: https://github.com/pavel-demin/red-pitaya-notes/commit/b478ace697b260edab1a2de4eb4e38ccfdbc5d18
 12.12.2016 DG8MG: Modified code to make it compatible with Pavel Demin's commit: https://github.com/pavel-demin/red-pitaya-notes/commit/8d92eafdecda8046b36da44b18150edcda0b1afa
+23.12.2016 DG8MG: Modified code to make it compatible with Pavel Demin's commit: https://github.com/pavel-demin/red-pitaya-notes/commit/899f9c9172b0a87a3638e529739f6232bafedb9f
+14.01.2017 DG8MG: Changed I2C bus handling when no Charly 25LC board is present.
 */
 
 // DG8MG
@@ -241,6 +243,7 @@ void alex_write()
 }
 
 uint16_t misc_data_0 = 0;
+uint16_t misc_data_1 = 0;
 
 inline int lower_bound(int *array, int size, int value)
 {
@@ -266,7 +269,7 @@ void misc_write()
     data |= code << (i * 4);
   }
 
-  data |= (misc_data_0 & 0x18) << 9;
+  data |= (misc_data_0 & 0x03) << 14 | (misc_data_1 & 0x18) << 9;
 
   if(i2c_misc_data != data)
   {
@@ -340,6 +343,7 @@ int main(int argc, char *argv[])
   struct sched_param param;
   pthread_attr_t attr;
   pthread_t thread;
+  volatile uint32_t *slcr;
   volatile void *cfg, *sts;
   volatile int32_t *tx_ramp, *dac_ramp;
   volatile uint16_t *tx_size, *dac_size;
@@ -383,23 +387,23 @@ int main(int argc, char *argv[])
       else
       {
         fprintf(stderr, "I2C write error!\n");
-        return EXIT_FAILURE;
+        // return EXIT_FAILURE;
       }
     }
     else
     {
       fprintf(stderr, "I2C ioctl error!\n");
-      return EXIT_FAILURE;
+      // return EXIT_FAILURE;
     }
   }
   else
   {
     fprintf(stderr, "I2C open error!\n");
-    return EXIT_FAILURE;
+    // return EXIT_FAILURE;
   }
   
   // Version info for debugging only!
-  fprintf(stderr, "Alpha-Version 12122016: Charly 25LC / HAMlab Edition\n");
+  fprintf(stderr, "Version 14012017: Charly 25LC / HAMlab Edition\n");
 #endif
 
 #ifndef CHARLY25LC
@@ -506,6 +510,7 @@ int main(int argc, char *argv[])
   }
 #endif
 
+  slcr = mmap(NULL, sysconf(_SC_PAGESIZE), PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0xF8000000);
   sts = mmap(NULL, sysconf(_SC_PAGESIZE), PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0x40000000);
   cfg = mmap(NULL, sysconf(_SC_PAGESIZE), PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0x40001000);
   alex = mmap(NULL, sysconf(_SC_PAGESIZE), PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0x40002000);
@@ -544,6 +549,10 @@ int main(int argc, char *argv[])
   dac_cntr = ((uint16_t *)(sts + 16));
   adc_cntr = ((uint16_t *)(sts + 18));
   gpio_in = ((uint8_t *)(sts + 20));
+
+  /* set FPGA clock to 143 MHz */
+  slcr[2] = 0xDF0D;
+  slcr[92] = (slcr[92] & ~0x03F03F30) | 0x00100700;
 
 #ifndef CHARLY25LC_STRIPPED
   /* set all GPIO pins to low */
@@ -734,12 +743,7 @@ int main(int argc, char *argv[])
               for(j = 0; j < 504; j += 8) *dac_data = *(uint32_t *)(buffer[i] + 528 + j);
             }
           }
-          else
 #endif
-          {
-            for(j = 0; j < 504; j += 8) jack_ringbuffer_write(playback_data, buffer[i] + 16 + j, 4);
-            for(j = 0; j < 504; j += 8) jack_ringbuffer_write(playback_data, buffer[i] + 528 + j, 4);
-          }
           process_ep2(buffer[i] + 11);
           process_ep2(buffer[i] + 523);
           break;
@@ -838,7 +842,7 @@ C3
 | | | | | | | |
 | | | | | | + +------------ Alex Attenuator (00 = 0dB, 01 = 10dB, 10 = 20dB, 11 = 30dB)
 | | | | | +---------------- Preamp On/Off (0 = Off, 1 = On)
-| | | | +------------------ LT2208 Dither (0 = Off, 1 = On)  // DG8MG: On Charly 25 LC hardware this bit is used for the switching of the second preamp
+| | | | +------------------ LT2208 Dither (0 = Off, 1 = On)  // DG8MG: On Charly 25LC hardware this bit is used for the switching of the second preamp
 | | | + ------------------- LT2208 Random (0= Off, 1 = On)
 | + + --------------------- Alex Rx Antenna (00 = none, 01 = Rx1, 10 = Rx2, 11 = XV)
 + ------------------------- Alex Rx out (0 = off, 1 = on). Set if Alex Rx Antenna > 0.
@@ -861,7 +865,7 @@ C3
       /* configure PENELOPE */
       if(i2c_pene)
       {
-        data = (frame[4] & 0x03) << 11 | (frame[3] & 0x60) << 4 | (frame[3] & 0x03) << 7 | frame[2] >> 1;
+        data = (frame[3] & 0x1c) << 11 | (frame[4] & 0x03) << 11 | (frame[3] & 0x60) << 4 | (frame[3] & 0x03) << 7 | frame[2] >> 1;
         if(i2c_pene_data != data)
         {
           i2c_pene_data = data;
@@ -1001,6 +1005,16 @@ C3
         alex_write();
       }
 
+      if(i2c_misc)
+      {
+        data = (frame[3] & 0x80) >> 6 | (frame[3] & 0x20) >> 5;
+        if(misc_data_0 != data)
+        {
+          misc_data_0 = data;
+          misc_write();
+        }
+      }
+
       /* configure ALEX */
       if(i2c_alex)
       {
@@ -1061,14 +1075,16 @@ C3
       break;
     case 22:
     case 23:
-      data = frame[1] & 0x1f;
-      if(misc_data_0 != data)
-      {
-        misc_data_0 = data;
-        if(i2c_misc) misc_write();
-      }
-
 #ifndef CHARLY25LC_STRIPPED
+      if(i2c_misc)
+      {
+        data = frame[1] & 0x1f;
+        if(misc_data_1 != data)
+        {
+          misc_data_1 = data;
+          misc_write();
+        }
+      }
       cw_reversed = (frame[2] >> 6) & 1;
       cw_speed = frame[3] & 63;
       cw_mode = (frame[3] >> 6) & 3;
@@ -1481,6 +1497,5 @@ void *handler_keyer(void *arg)
       }
     }
   }
-
   return NULL;
 }
