@@ -12,14 +12,15 @@ cp tmp/scanner.bit ${ecosystem}-scanner
 rm -f ${ecosystem}-scanner/u-boot.scr
 cp ${ecosystem}-scanner/u-boot.scr.buildroot ${ecosystem}-scanner/u-boot.scr
 
+cat <<- EOF_CAT >> ${ecosystem}-mcpha/etc/network/config
+
+PATH=\$PATH:\$PATH_REDPITAYA/sbin:\$PATH_REDPITAYA/bin
+
+EOF_CAT
+
 cat <<- EOF_CAT >> ${ecosystem}-scanner/sbin/discovery.sh
 
 # start scanner server
-
-devcfg=/sys/devices/soc0/amba/f8007000.devcfg
-test -d \$devcfg/fclk/fclk0 || echo fclk0 > \$devcfg/fclk_export
-echo 1 > \$devcfg/fclk/fclk0/enable
-echo 143000000 > \$devcfg/fclk/fclk0/set_rate
 
 cat /opt/redpitaya/scanner.bit > /dev/xdevcfg
 

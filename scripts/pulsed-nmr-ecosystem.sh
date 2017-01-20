@@ -12,14 +12,15 @@ cp tmp/pulsed_nmr.bit ${ecosystem}-pulsed-nmr
 rm -f ${ecosystem}-pulsed-nmr/u-boot.scr
 cp ${ecosystem}-pulsed-nmr/u-boot.scr.buildroot ${ecosystem}-pulsed-nmr/u-boot.scr
 
+cat <<- EOF_CAT >> ${ecosystem}-mcpha/etc/network/config
+
+PATH=\$PATH:\$PATH_REDPITAYA/sbin:\$PATH_REDPITAYA/bin
+
+EOF_CAT
+
 cat <<- EOF_CAT >> ${ecosystem}-pulsed-nmr/sbin/discovery.sh
 
 # start pulsed NMR server
-
-devcfg=/sys/devices/soc0/amba/f8007000.devcfg
-test -d \$devcfg/fclk/fclk0 || echo fclk0 > \$devcfg/fclk_export
-echo 1 > \$devcfg/fclk/fclk0/enable
-echo 143000000 > \$devcfg/fclk/fclk0/set_rate
 
 cat /opt/redpitaya/pulsed_nmr.bit > /dev/xdevcfg
 

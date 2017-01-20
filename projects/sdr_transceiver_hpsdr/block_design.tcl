@@ -133,11 +133,11 @@ cell xilinx.com:ip:util_vector_logic:2.0 not_0 {
 delete_bd_objs [get_bd_ports exp_p_tri_io]
 
 # Create output port
-create_bd_port -dir O -from 7 -to 0 exp_p_tri_io
+create_bd_port -dir O -from 0 -to 0 exp_p_tri_io
 
 # Create xlslice
 cell xilinx.com:ip:xlslice:1.0 out_slice_0 {
-  DIN_WIDTH 320 DIN_FROM 31 DIN_TO 24 DOUT_WIDTH 8
+  DIN_WIDTH 320 DIN_FROM 24 DIN_TO 24 DOUT_WIDTH 1
 } {
   Din cfg_0/cfg_data
 }

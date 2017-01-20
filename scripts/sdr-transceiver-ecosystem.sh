@@ -12,14 +12,15 @@ cp tmp/sdr_transceiver.bit ${ecosystem}-sdr-transceiver
 rm -f ${ecosystem}-sdr-transceiver/u-boot.scr
 cp ${ecosystem}-sdr-transceiver/u-boot.scr.buildroot ${ecosystem}-sdr-transceiver/u-boot.scr
 
+cat <<- EOF_CAT >> ${ecosystem}-mcpha/etc/network/config
+
+PATH=\$PATH:\$PATH_REDPITAYA/sbin:\$PATH_REDPITAYA/bin
+
+EOF_CAT
+
 cat <<- EOF_CAT >> ${ecosystem}-sdr-transceiver/sbin/discovery.sh
 
 # start SDR transceiver
-
-devcfg=/sys/devices/soc0/amba/f8007000.devcfg
-test -d \$devcfg/fclk/fclk0 || echo fclk0 > \$devcfg/fclk_export
-echo 1 > \$devcfg/fclk/fclk0/enable
-echo 143000000 > \$devcfg/fclk/fclk0/set_rate
 
 cat /opt/redpitaya/sdr_transceiver.bit > /dev/xdevcfg
 
