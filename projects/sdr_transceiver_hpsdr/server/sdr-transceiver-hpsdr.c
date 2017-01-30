@@ -23,6 +23,9 @@
 // Define CHARLY25LC for Charly 25LC specific builds
 #define CHARLY25LC 1
 
+// Define if codec is used
+#define CHARLY25_CODEC 1
+
 // Define CHARLY25LC_STRIPPED together with CHARLY25LC for Charly 25LC specific builds without extentions - this may lead to broken code!!!
 // #define CHARLY25LC_STRIPPED 1
 
@@ -509,7 +512,9 @@ int main(int argc, char *argv[])
       }
     }
   }
-#else
+#endif
+
+#ifdef CHARLY25_CODEC
 int i2c_codec_fd;
 if((i2c_codec_fd = open("/dev/i2c-6", O_RDWR)) >= 0)
     if(ioctl(i2c_codec_fd, I2C_SLAVE, ADDR_CODEC) >= 0)
