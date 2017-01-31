@@ -16,15 +16,11 @@
 12.12.2016 DG8MG: Modified code to make it compatible with Pavel Demin's commit: https://github.com/pavel-demin/red-pitaya-notes/commit/8d92eafdecda8046b36da44b18150edcda0b1afa
 23.12.2016 DG8MG: Modified code to make it compatible with Pavel Demin's commit: https://github.com/pavel-demin/red-pitaya-notes/commit/899f9c9172b0a87a3638e529739f6232bafedb9f
 14.01.2017 DG8MG: Changed I2C bus handling when no Charly 25LC board is present.
-25.01.2017 adding codec initialization on HAMlab.
 */
 
 // DG8MG
 // Define CHARLY25LC for Charly 25LC specific builds
 #define CHARLY25LC 1
-
-// Define if codec is used
-#define CHARLY25_CODEC 1
 
 // Define CHARLY25LC_STRIPPED together with CHARLY25LC for Charly 25LC specific builds without extentions - this may lead to broken code!!!
 // #define CHARLY25LC_STRIPPED 1
@@ -512,41 +508,6 @@ int main(int argc, char *argv[])
       }
     }
   }
-#endif
-
-#ifdef CHARLY25_CODEC
-int i2c_codec_fd;
-if((i2c_codec_fd = open("/dev/i2c-6", O_RDWR)) >= 0)
-    if(ioctl(i2c_codec_fd, I2C_SLAVE, ADDR_CODEC) >= 0)
-    {
-      /* reset */
-      if(i2c_write_addr_data8(i2c_codec_fd, 0x1e, 0x00) > 0)
-      {
-        i2c_codec = 1;
-        /* set power down register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x0c, 0x51);
-        /* reset activate register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x12, 0x00);
-        /* set volume to -10 dB */
-        i2c_write_addr_data8(i2c_codec_fd, 0x04, 0x6f);
-        i2c_write_addr_data8(i2c_codec_fd, 0x06, 0x6f);
-        /* set analog audio path register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x08, 0x14);
-        /* set digital audio path register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x0a, 0x00);
-        /* set format register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x0e, 0x42);
-        /* set activate register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x12, 0x01);
-        /* set power down register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x0c, 0x41);
-
-        if(i2c_codec_fd){
-		close(i2c_codec_fd);
-		i2c_codec_fd=-1;
-	}
-      }
-    }
 #endif
 
   slcr = mmap(NULL, sysconf(_SC_PAGESIZE), PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0xF8000000);
