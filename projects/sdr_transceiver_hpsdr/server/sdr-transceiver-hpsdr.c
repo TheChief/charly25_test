@@ -16,16 +16,19 @@
 12.12.2016 DG8MG: Modified code to make it compatible with Pavel Demin's commit: https://github.com/pavel-demin/red-pitaya-notes/commit/8d92eafdecda8046b36da44b18150edcda0b1afa
 23.12.2016 DG8MG: Modified code to make it compatible with Pavel Demin's commit: https://github.com/pavel-demin/red-pitaya-notes/commit/899f9c9172b0a87a3638e529739f6232bafedb9f
 14.01.2017 DG8MG: Changed I2C bus handling when no Charly 25LC board is present.
-25.01.2017 adding codec initialization on HAMlab.
-29.01.2017 DG8MG: Added support for the LPFs on the Charly 25AB board
-30.01.2017 DG8MG: Added audio codec support for Charly 25 hardware outside a HAMlab
-03.02.2017 DG8MG: Added basic support for the BPFs on the Charly 25 RX BPF board based on the first prototype board
-04.02.2017 DG8MG: Added support for RX1 and RX2 using the BPFs on the new Charly 25 RX BPF board (different layout and PCA9555 I/O routing)
+29.01.2017 DG8MG: Added support for the LPFs on the Charly 25AB board.
+30.01.2017 DG8MG: Added audio codec support for Charly 25 hardware outside a HAMlab.
+03.02.2017 DG8MG: Added basic support for the BPFs on the Charly 25 RX BPF board based on the first prototype board.
+04.02.2017 DG8MG: Added support for RX1 and RX2 using the BPFs on the new Charly 25 RX BPF board (different layout and PCA9555 I/O routing).
+16.02.2017 DG8MG: Added backward compatibility to the Charly 25LC (4 band version) board.
 */
 
 // DG8MG
 // Define CHARLY25AB for Charly 25AB specific builds
 #define CHARLY25AB 1
+
+// Define CHARLY25LC together with CHARLY25AB for Charly 25LC (4 band version) compatible builds
+#define CHARLY25LC 1
 
 // Define if codec is used
 #define CHARLY25_CODEC 1
@@ -65,7 +68,7 @@
 #define I2C_SLAVE_FORCE 0x0706 /* Use this slave address, even if it
                                   is already in use by a driver! */
 
-#ifndef CHARLY25AB_STRIPPED
+#ifndef CHARLY25AB
 #define ADDR_PENE 0x20 /* PCA9555 address 0 */
 #define ADDR_ALEX 0x21 /* PCA9555 address 1 */
 #define ADDR_LEVEL 0x22 /* PCA9555 address 2 */
@@ -148,7 +151,7 @@ void process_ep2(uint8_t *frame);
 void *handler_ep6(void *arg);
 void *handler_keyer(void *arg);
 
-#ifndef CHARLY25AB_STRIPPED
+#ifndef CHARLY25AB
 /* variables to handle I2C devices */
 int i2c_fd;
 int i2c_pene = 0;
@@ -160,7 +163,7 @@ int i2c_drive = 0;
 
 int i2c_codec = 0;
 
-#ifndef CHARLY25AB_STRIPPED
+#ifndef CHARLY25AB
 int i2c_dac0 = 0;
 int i2c_dac1 = 0;
 
@@ -180,7 +183,7 @@ uint8_t dac_level_data = 0;
 
 uint8_t cw_int_data = 0;
 
-#ifndef CHARLY25AB_STRIPPED
+#ifndef CHARLY25AB
 uint8_t rx_att_data = 0;
 #endif
 
@@ -383,76 +386,222 @@ void icom_write()
 int i2c_fd;
 
 bool c25ab_i2c_present = false;
+bool c25lc_i2c_present = false;
 bool c25_rx1_bpf_i2c_present = false;
 bool c25_rx2_bpf_i2c_present = false;
-uint16_t c25_i2c_data = 0;
 
-void c25_switch_rx_bpf(uint8_t c25_rx_bpf_addr, uint32_t c25_rx_freq)
-      {
-        /* Wipe bits that might get changed in this frame */  
-        uint16_t c25_i2c_new_data = 0x0000;
-    
-        /* Switch BPF depending on RX frequency */
-        if(C25_6M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_6M_LOW_FREQ)  /* 6m BPF */
-        {
-          c25_i2c_new_data |= 1 << 12;
-        }
-        else if(C25_10M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_10M_LOW_FREQ)  /* 10m BPF */
-        {
-          c25_i2c_new_data |= 1 << 13;
-        }
-        else if(C25_12M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_12M_LOW_FREQ)  /* 12m BPF */
-        {
-          c25_i2c_new_data |= 1 << 14;
-        }
-        else if(C25_15M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_15M_LOW_FREQ)  /* 15m BPF */
-        {
-          c25_i2c_new_data |= 1 << 15;
-        }    
-        else if(C25_17M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_17M_LOW_FREQ)  /* 17m BPF */
-        {
-          c25_i2c_new_data |= 1 << 0;
-        }
-        else if(C25_20M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_20M_LOW_FREQ)  /* 20m BPF */
-        {
-          c25_i2c_new_data |= 1 << 1;
-        }
-        else if(C25_30M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_30M_LOW_FREQ)  /* 30m BPF */
-        {
-          c25_i2c_new_data |= 1 << 2;
-        }
-        else if(C25_40M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_40M_LOW_FREQ)  /* 40m BPF */
-        {
-          c25_i2c_new_data |= 1 << 3;
-        }
-        else if(C25_60M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_60M_LOW_FREQ)  /* 60m BPF */
-        {
-          c25_i2c_new_data |= 1 << 4;
-        }
-        else if(C25_80M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_80M_LOW_FREQ) /* 80m BPF */
-        {
-          c25_i2c_new_data |= 1 << 5;
-        }
-        else if(C25_160M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_160M_LOW_FREQ) /* 160m BPF */
-        {
-          c25_i2c_new_data |= 1 << 6;
-        }
-        else  /* Default filter for LF or outside of the HAM bands */
-        {
-          c25_i2c_new_data |= 1 << 7;
-        }
-        
-#ifdef DEBUG 
-        fprintf(stderr, "BPF bitmask in hex: %x\n", c25_i2c_new_data);
-#endif
+uint16_t c25_switch_att_pre(uint8_t frame_3, uint16_t c25_i2c_data)
+{
+  static uint16_t c25_att_pre_i2c_data = 0;
   
-        if (c25_i2c_new_data != c25_i2c_data)
-        {
-          c25_i2c_data = c25_i2c_new_data;
-          ioctl(i2c_fd, I2C_SLAVE, c25_rx_bpf_addr);
-          i2c_write_addr_data16(i2c_fd, 0x02, c25_i2c_data);
-        }      
-      }
+  /* Wipe bits that might get changed */
+  /* first and second f are LPFs */
+  uint16_t c25_att_pre_i2c_new_data = c25_i2c_data & 0xfff0;
+  
+  /* Attenuator */
+  c25_att_pre_i2c_new_data |= frame_3 & 3;  // C3: Bit 0-1 - Alex Attenuator (00 = 0dB, 01 = 10dB, 10 = 20dB, 11 = 30dB)
+  
+/*
+DG8MG: On Charly 25AB hardware C3 bit 3 is used for the switching of the second preamp
+C3
+0 0 0 0 0 0 0 0
+| | | | | | | |
+| | | | | | + +------------ Alex Attenuator (00 = 0dB, 01 = 10dB, 10 = 20dB, 11 = 30dB)
+| | | | | +---------------- Preamp On/Off (0 = Off, 1 = On)
+| | | | +------------------ LT2208 Dither (0 = Off, 1 = On)  // DG8MG: On Charly 25AB hardware this bit is used for the switching of the second preamp
+| | | + ------------------- LT2208 Random (0= Off, 1 = On)
+| + + --------------------- Alex Rx Antenna (00 = none, 01 = Rx1, 10 = Rx2, 11 = XV)
++ ------------------------- Alex Rx out (0 = off, 1 = on). Set if Alex Rx Antenna > 0.
+*/
+
+  /* Activate preamp one and two as expected from the frontend software (f.e. PowerSDR Charly 25 / HAMlab Edition) */
+  c25_att_pre_i2c_new_data |= frame_3 & 12;  // C3: Bit 2 - Preamp On/Off (0 = Off, 1 = On), Bit 3 -  LT2208 Dither (0 = Off, 1 = On)
+  
+  if (c25_att_pre_i2c_new_data != c25_att_pre_i2c_data)
+  {
+    c25_att_pre_i2c_data = c25_att_pre_i2c_new_data;
+    ioctl(i2c_fd, I2C_SLAVE, C25_ADDR);
+    i2c_write_addr_data16(i2c_fd, 0x02, c25_att_pre_i2c_data);
+  }
+  
+  return c25_att_pre_i2c_data; 
+}
+
+uint16_t c25ab_switch_tx_lpf(bool mox, uint16_t c25ab_i2c_data, uint32_t c25_tx_freq)
+{
+  static uint16_t c25ab_tx_lpf_i2c_data = 0;
+  
+  /* Wipe bits that might get changed */  
+  uint16_t c25ab_tx_lpf_i2c_new_data = c25ab_i2c_data & 0x004f;
+
+  /* Switch LPF depending on TX frequency */
+  if(C25_6M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_6M_LOW_FREQ)  /* 6m LPF */
+  {
+    c25ab_tx_lpf_i2c_new_data |= 1 << 8;
+  }
+  else if((C25_10M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_10M_LOW_FREQ) || (C25_12M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_12M_LOW_FREQ))  /* 10/12m LPF */
+  {
+    c25ab_tx_lpf_i2c_new_data |= 1 << 9;
+  }
+  else if((C25_15M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_15M_LOW_FREQ) || (C25_17M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_17M_LOW_FREQ))  /* 15/17m LPF */
+  {
+    c25ab_tx_lpf_i2c_new_data |= 1 << 10;
+  }
+  else if((C25_20M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_20M_LOW_FREQ) || (C25_30M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_30M_LOW_FREQ))  /* 20/30m LPF */
+  {
+    c25ab_tx_lpf_i2c_new_data |= 1 << 11;
+  }
+  else if((C25_40M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_40M_LOW_FREQ) || (C25_60M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_60M_LOW_FREQ))  /* 40/60m LPF */
+  {
+    c25ab_tx_lpf_i2c_new_data |= 1 << 12;
+  }
+  else if(C25_80M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_80M_LOW_FREQ)  /* 80m LPF */
+  {
+    c25ab_tx_lpf_i2c_new_data |= 1 << 13;
+  }
+  else if(C25_160M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_160M_LOW_FREQ)  /* 160m LPF */
+  {
+    c25ab_tx_lpf_i2c_new_data |= 1 << 14;
+  }
+  
+  /* Turn PTT and PA only on if a LPF is active */
+  if((c25ab_tx_lpf_i2c_new_data & 0x7f00) != 0)
+  {
+    c25ab_tx_lpf_i2c_new_data |= (mox & 1) << 4;  // C0: Bit 0 - MOX (1 = active, 0 = inactive)
+    c25ab_tx_lpf_i2c_new_data |= (mox & 1) << 5;  // C0: Bit 0 - MOX (1 = active, 0 = inactive)
+  }
+
+#ifdef DEBUG
+  fprintf(stderr, "LPF bitmask in hex: %x\n", (c25ab_tx_lpf_i2c_new_data & 0x7f00) >> 8);
+  fprintf(stderr, "PA and PTT state %d\n", (c25ab_tx_lpf_i2c_new_data & 0x0030) >> 4);
+  fprintf(stderr, "c25ab_i2c_present: %d, c25ab_tx_lpf_i2c_new_data in hex: %x\n", c25ab_i2c_present, c25ab_tx_lpf_i2c_new_data); 
+#endif  
+
+  if (c25ab_tx_lpf_i2c_new_data != c25ab_tx_lpf_i2c_data)
+  {
+    c25ab_tx_lpf_i2c_data = c25ab_tx_lpf_i2c_new_data;
+    ioctl(i2c_fd, I2C_SLAVE, C25_ADDR);
+    i2c_write_addr_data16(i2c_fd, 0x02, c25ab_tx_lpf_i2c_data);
+  }
+  
+  return c25ab_tx_lpf_i2c_data; 
+}
+      
+uint16_t c25lc_switch_tx_lpf(bool mox, uint16_t c25lc_i2c_data, uint32_t c25_tx_freq)
+{
+  static uint16_t c25lc_tx_lpf_i2c_data = 0;
+  
+  /* Wipe bits that might get changed */  
+  uint16_t c25lc_tx_lpf_i2c_new_data = c25lc_i2c_data & 0x00ff;
+
+  /* Switch LPF depending on TX frequency */
+  if(C25_10M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_10M_LOW_FREQ)  /* 10m LPF */
+  {
+    c25lc_tx_lpf_i2c_new_data |= 1 << 8;
+  }
+  else if(C25_20M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_20M_LOW_FREQ)  /* 20m LPF */
+  {
+    c25lc_tx_lpf_i2c_new_data |= 1 << 9;
+  }
+  else if(C25_40M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_40M_LOW_FREQ)  /* 40m LPF */
+  {
+    c25lc_tx_lpf_i2c_new_data |= 1 << 10;
+  }
+  else if(C25_80M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_80M_LOW_FREQ)  /* 80m LPF */
+  {
+    c25lc_tx_lpf_i2c_new_data |= 1 << 11;
+  }
+  
+  /* Turn PTT and PA only on if a LPF is active */
+  if((c25lc_tx_lpf_i2c_new_data & 0x0f00) != 0)
+  {
+    c25lc_tx_lpf_i2c_new_data |= (mox & 1) << 12;  // C0: Bit 0 - MOX (1 = active, 0 = inactive)
+    c25lc_tx_lpf_i2c_new_data |= (mox & 1) << 13;  // C0: Bit 0 - MOX (1 = active, 0 = inactive)
+  }
+
+#ifdef DEBUG
+  fprintf(stderr, "LPF bitmask in hex: %x\n", (c25lc_tx_lpf_i2c_new_data & 0x0f00) >> 8);
+  fprintf(stderr, "PA and PTT state %d\n", (c25lc_tx_lpf_i2c_new_data & 0x3000) >> 12);
+  fprintf(stderr, "c25lc_i2c_present: %d, c25lc_tx_lpf_i2c_new_data in hex: %x\n", c25lc_i2c_present, c25lc_tx_lpf_i2c_new_data); 
+#endif  
+
+  if (c25lc_tx_lpf_i2c_new_data != c25lc_tx_lpf_i2c_data)
+  {
+    c25lc_tx_lpf_i2c_data = c25lc_tx_lpf_i2c_new_data;
+    ioctl(i2c_fd, I2C_SLAVE, C25_ADDR);
+    i2c_write_addr_data16(i2c_fd, 0x02, c25lc_tx_lpf_i2c_data);
+  }
+  
+  return c25lc_tx_lpf_i2c_data;
+}
+
+ssize_t c25_switch_rx_bpf(uint8_t c25_rx_bpf_addr, uint32_t c25_rx_freq)
+{
+  static uint16_t c25_rx_bpf_i2c_data = 0;
+  
+  /* Wipe bits that might get changed in this frame */  
+  uint16_t c25_rx_bpf_i2c_new_data = 0x0000;
+
+  /* Switch BPF depending on RX frequency */
+  if(C25_6M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_6M_LOW_FREQ)  /* 6m BPF */
+  {
+    c25_rx_bpf_i2c_new_data |= 1 << 12;
+  }
+  else if(C25_10M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_10M_LOW_FREQ)  /* 10m BPF */
+  {
+    c25_rx_bpf_i2c_new_data |= 1 << 13;
+  }
+  else if(C25_12M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_12M_LOW_FREQ)  /* 12m BPF */
+  {
+    c25_rx_bpf_i2c_new_data |= 1 << 14;
+  }
+  else if(C25_15M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_15M_LOW_FREQ)  /* 15m BPF */
+  {
+    c25_rx_bpf_i2c_new_data |= 1 << 15;
+  }    
+  else if(C25_17M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_17M_LOW_FREQ)  /* 17m BPF */
+  {
+    c25_rx_bpf_i2c_new_data |= 1 << 0;
+  }
+  else if(C25_20M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_20M_LOW_FREQ)  /* 20m BPF */
+  {
+    c25_rx_bpf_i2c_new_data |= 1 << 1;
+  }
+  else if(C25_30M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_30M_LOW_FREQ)  /* 30m BPF */
+  {
+    c25_rx_bpf_i2c_new_data |= 1 << 2;
+  }
+  else if(C25_40M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_40M_LOW_FREQ)  /* 40m BPF */
+  {
+    c25_rx_bpf_i2c_new_data |= 1 << 3;
+  }
+  else if(C25_60M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_60M_LOW_FREQ)  /* 60m BPF */
+  {
+    c25_rx_bpf_i2c_new_data |= 1 << 4;
+  }
+  else if(C25_80M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_80M_LOW_FREQ) /* 80m BPF */
+  {
+    c25_rx_bpf_i2c_new_data |= 1 << 5;
+  }
+  else if(C25_160M_HIGH_FREQ > c25_rx_freq && c25_rx_freq >= C25_160M_LOW_FREQ) /* 160m BPF */
+  {
+    c25_rx_bpf_i2c_new_data |= 1 << 6;
+  }
+  else  /* Default filter for LF or outside of the HAM bands */
+  {
+    c25_rx_bpf_i2c_new_data |= 1 << 7;
+  }
+  
+#ifdef DEBUG 
+  fprintf(stderr, "BPF bitmask in hex: %x\n", c25_rx_bpf_i2c_new_data);
+#endif
+  if (c25_rx_bpf_i2c_new_data != c25_rx_bpf_i2c_data)
+  {
+    c25_rx_bpf_i2c_data = c25_rx_bpf_i2c_new_data;
+    ioctl(i2c_fd, I2C_SLAVE, c25_rx_bpf_addr);
+    return i2c_write_addr_data16(i2c_fd, 0x02, c25_rx_bpf_i2c_data);
+  }      
+}
 #endif
 
 int main(int argc, char *argv[])
@@ -496,9 +645,15 @@ int main(int argc, char *argv[])
     if(ioctl(i2c_fd, I2C_SLAVE_FORCE, C25_ADDR) >= 0)
     {
       /* set all pins to low */
-      if(i2c_write_addr_data16(i2c_fd, 0x02, 0x0000))
+      if(i2c_write_addr_data16(i2c_fd, 0x02, 0x0000) > 0)
       {
+
+#ifdef CHARLY25LC
+        c25lc_i2c_present = true;
+#else
         c25ab_i2c_present = true;
+#endif
+
         /* configure all pins as output */
         i2c_write_addr_data16(i2c_fd, 0x06, 0x0000);
       }
@@ -517,7 +672,7 @@ int main(int argc, char *argv[])
     if(ioctl(i2c_fd, I2C_SLAVE_FORCE, C25_RX1_BPF_ADDR) >= 0)
     {
       /* set all pins to low */
-      if(i2c_write_addr_data16(i2c_fd, 0x02, 0x0000))
+      if(i2c_write_addr_data16(i2c_fd, 0x02, 0x0000) > 0)
       {
         c25_rx1_bpf_i2c_present = true;
         /* configure all pins as output */
@@ -538,7 +693,7 @@ int main(int argc, char *argv[])
     if(ioctl(i2c_fd, I2C_SLAVE_FORCE, C25_RX2_BPF_ADDR) >= 0)
     {
       /* set all pins to low */
-      if(i2c_write_addr_data16(i2c_fd, 0x02, 0x0000))
+      if(i2c_write_addr_data16(i2c_fd, 0x02, 0x0000) > 0)
       {
         c25_rx2_bpf_i2c_present = true;
         /* configure all pins as output */
@@ -562,8 +717,17 @@ int main(int argc, char *argv[])
     // return EXIT_FAILURE;
   }
   
-  // Version info for debugging only!
-  fprintf(stderr, "Version 04022017: Charly 25AB / HAMlab Edition\n");
+  // Version and hardware info for debugging only!
+  fprintf(stderr, "Version 16022017: ");
+#ifdef CHARLY25AB_HAMLAB
+  fprintf(stderr, "HAMlab Edition\n");
+#else
+  fprintf(stderr, "Charly 25 Edition\n");
+#endif
+  if(c25ab_i2c_present) fprintf(stderr, "Hardware: Charly 25AB present\n");
+  if(c25lc_i2c_present) fprintf(stderr, "Hardware: Charly 25LC present\n");
+  if(c25_rx1_bpf_i2c_present) fprintf(stderr, "Hardware: Charly 25 RX 1 BPF present\n");
+  if(c25_rx2_bpf_i2c_present) fprintf(stderr, "Hardware: Charly 25 RX 2 BPF present\n");
 #endif
 
 #ifndef CHARLY25AB
@@ -671,46 +835,33 @@ int main(int argc, char *argv[])
 #endif
 
 #ifdef CHARLY25_CODEC
-  int i2c_codec_fd;
-
-#ifndef CHARLY25AB_HAMLAB  // Charly 25AB with codec present but not in a HAMlab
-  i2c_codec_fd = i2c_fd;
-#else
-  if((i2c_codec_fd = open("/dev/i2c-6", O_RDWR)) >= 0)
-#endif
-
-    if(ioctl(i2c_codec_fd, I2C_SLAVE, C25_CODEC_ADDR) >= 0)
+#ifndef CHARLY25AB_HAMLAB  // Charly 25 with codec present but not in a HAMlab
+    if(ioctl(i2c_fd, I2C_SLAVE, C25_CODEC_ADDR) >= 0)
     {
       /* reset */
-      if(i2c_write_addr_data8(i2c_codec_fd, 0x1e, 0x00) > 0)
+      if(i2c_write_addr_data8(i2c_fd, 0x1e, 0x00) > 0)
       {
         i2c_codec = 1;
         /* set power down register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x0c, 0x51);
+        i2c_write_addr_data8(i2c_fd, 0x0c, 0x51);
         /* reset activate register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x12, 0x00);
+        i2c_write_addr_data8(i2c_fd, 0x12, 0x00);
         /* set volume to -10 dB */
-        i2c_write_addr_data8(i2c_codec_fd, 0x04, 0x6f);
-        i2c_write_addr_data8(i2c_codec_fd, 0x06, 0x6f);
+        i2c_write_addr_data8(i2c_fd, 0x04, 0x6f);
+        i2c_write_addr_data8(i2c_fd, 0x06, 0x6f);
         /* set analog audio path register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x08, 0x14);
+        i2c_write_addr_data8(i2c_fd, 0x08, 0x14);
         /* set digital audio path register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x0a, 0x00);
+        i2c_write_addr_data8(i2c_fd, 0x0a, 0x00);
         /* set format register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x0e, 0x42);
+        i2c_write_addr_data8(i2c_fd, 0x0e, 0x42);
         /* set activate register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x12, 0x01);
+        i2c_write_addr_data8(i2c_fd, 0x12, 0x01);
         /* set power down register */
-        i2c_write_addr_data8(i2c_codec_fd, 0x0c, 0x41);
-
-#ifdef CHARLY25AB_HAMLAB
-        if(i2c_codec_fd){
-        close(i2c_codec_fd);
-        i2c_codec_fd=-1;
-        }
-#endif
+        i2c_write_addr_data8(i2c_fd, 0x0c, 0x41);
       }
     }
+#endif
 #endif
 
   slcr = mmap(NULL, sysconf(_SC_PAGESIZE), PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0xF8000000);
@@ -835,11 +986,8 @@ int main(int argc, char *argv[])
   }
   else
   {
-
-#ifndef CHARLY25AB_STRIPPED
     /* enable ALEX interface */
     *codec_rst |= 2;
-#endif
   }
 
   if((sock_ep2 = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
@@ -983,16 +1131,13 @@ int main(int argc, char *argv[])
 
 void process_ep2(uint8_t *frame)
 {
+  bool mox = false;
+  static uint16_t c25_i2c_data = 0;
+    
   uint32_t freq, c25_tx_freq, c25_rx1_freq, c25_rx2_freq, c25_rx3_freq, c25_rx4_freq;
   uint16_t data;
   uint8_t ptt, preamp, att, boost;
-
-#ifdef CHARLY25AB
-  /* Might get changed throughout this method */
-  /* Doesn't get sent if it doesn't change to reduce load on the I2C bus */
-  uint16_t c25_i2c_new_data = c25_i2c_data; 
-#endif
-  
+ 
   switch(frame[0])
   {
     case 0:
@@ -1006,6 +1151,8 @@ void process_ep2(uint8_t *frame)
       preamp = ptt | (*gpio_in & 1) ? 0 : (frame[3] & 0x04) >> 2 | (rx_att_data == 0);
       *gpio_out = (frame[2] & 0x1e) << 3 | att << 2 | preamp << 1 | ptt;
 #else
+      /* set output pins */
+      ptt = frame[0] & 0x01;
       *gpio_out = (*gpio_out & 0xfe) | ptt;
 #endif
 
@@ -1028,29 +1175,8 @@ void process_ep2(uint8_t *frame)
       }
 
 #ifdef CHARLY25AB
-      /* Wipe bits that might get changed in this frame */
-      /* first and second f are LPFs */
-      c25_i2c_new_data &= 0xfff0;
-
-      /* Attenuator */
-      c25_i2c_new_data |= frame[3] & 3;  // C3: Bit 0-1 - Alex Attenuator (00 = 0dB, 01 = 10dB, 10 = 20dB, 11 = 30dB)
-
-/*
-DG8MG: On Charly 25AB hardware C3 bit 3 is used for the switching of the second preamp
-C3
-0 0 0 0 0 0 0 0
-| | | | | | | |
-| | | | | | + +------------ Alex Attenuator (00 = 0dB, 01 = 10dB, 10 = 20dB, 11 = 30dB)
-| | | | | +---------------- Preamp On/Off (0 = Off, 1 = On)
-| | | | +------------------ LT2208 Dither (0 = Off, 1 = On)  // DG8MG: On Charly 25AB hardware this bit is used for the switching of the second preamp
-| | | + ------------------- LT2208 Random (0= Off, 1 = On)
-| + + --------------------- Alex Rx Antenna (00 = none, 01 = Rx1, 10 = Rx2, 11 = XV)
-+ ------------------------- Alex Rx out (0 = off, 1 = on). Set if Alex Rx Antenna > 0.
-*/
-      
-  
-      /* Activate preamp one and two as expected from the frontend software (f.e. PowerSDR Charly 25 / HAMlab Edition) */
-      c25_i2c_new_data |= frame[3] & 12;  // C3: Bit 2 - Preamp On/Off (0 = Off, 1 = On), Bit 3 -  LT2208 Dither (0 = Off, 1 = On)
+      /* switch the attenuators and preamps on the Charly 25 board */
+      c25_i2c_data = c25_switch_att_pre(frame[3], c25_i2c_data);
       break;
 #endif
 
@@ -1092,67 +1218,27 @@ C3
     case 3:  // C0: Bit 1-4 - Transmitter - C0: Bit 0 - MOX -> 1 = active
       /* set tx phase increment */
 
-#ifdef CHARLY25AB
+#ifdef CHARLY25AB    
+      mox = frame[0] & 1;
       c25_tx_freq = ntohl(*(uint32_t *)(frame + 1));
+      
+#ifdef DEBUG
+      fprintf(stderr, "c25_tx_freq: %zu\n\n", c25_tx_freq);
+#endif
 
       if(c25_tx_freq < freq_min || c25_tx_freq > freq_max) break;
       *tx_freq = (uint32_t)floor(c25_tx_freq / 125.0e6 * (1 << 30) + 0.5);
 
       if (c25ab_i2c_present)
       {
-        /* Wipe bits that might get changed in this frame */  
-        c25_i2c_new_data &= 0x004f;
-    
-        /* Switch LPF depending on TX frequency */
-        if(C25_6M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_6M_LOW_FREQ)  /* 6m LPF */
-        {
-          c25_i2c_new_data |= 1 << 8;
-        }
-        else if((C25_10M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_10M_LOW_FREQ) || (C25_12M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_12M_LOW_FREQ))  /* 10/12m LPF */
-        {
-          c25_i2c_new_data |= 1 << 9;
-        }
-        else if((C25_15M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_15M_LOW_FREQ) || (C25_17M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_17M_LOW_FREQ))  /* 15/17m LPF */
-        {
-          c25_i2c_new_data |= 1 << 10;
-        }
-        else if((C25_20M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_20M_LOW_FREQ) || (C25_30M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_30M_LOW_FREQ))  /* 20/30m LPF */
-        {
-          c25_i2c_new_data |= 1 << 11;
-        }
-        else if((C25_40M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_40M_LOW_FREQ) || (C25_60M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_60M_LOW_FREQ))  /* 40/60m LPF */
-        {
-          c25_i2c_new_data |= 1 << 12;
-        }
-        else if(C25_80M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_80M_LOW_FREQ)  /* 80m LPF */
-        {
-          c25_i2c_new_data |= 1 << 13;
-        }
-        else if(C25_160M_HIGH_FREQ > c25_tx_freq && c25_tx_freq >= C25_160M_LOW_FREQ)  /* 160m LPF */
-        {
-          c25_i2c_new_data |= 1 << 14;
-        }
-        
-        /* Turn PTT and PA only on if a LPF is active */
-        if((c25_i2c_new_data & 0x7f00) != 0)
-        {
-          c25_i2c_new_data |= (frame[0] & 1) << 4;  // C0: Bit 0 - MOX (1 = active, 0 = inactive)
-          c25_i2c_new_data |= (frame[0] & 1) << 5;  // C0: Bit 0 - MOX (1 = active, 0 = inactive)
-        }
-    
-#ifdef DEBUG
-        fprintf(stderr, "LPF bitmask in hex: %x\n", (c25_i2c_new_data & 0x7f00) >> 8);
-        fprintf(stderr, "PA and PTT state %d\n", (c25_i2c_new_data & 0x0030) >> 4);
-        fprintf(stderr, "c25ab_i2c_present: %d, c25_i2c_new_data: %x\n", c25ab_i2c_present, c25_i2c_new_data); 
-#endif  
-    
-        if (c25_i2c_new_data != c25_i2c_data)
-        {
-          c25_i2c_data = c25_i2c_new_data;
-          ioctl(i2c_fd, I2C_SLAVE, C25_ADDR);
-          i2c_write_addr_data16(i2c_fd, 0x02, c25_i2c_data);
-        }
+        c25_i2c_data = c25ab_switch_tx_lpf(mox, c25_i2c_data, c25_tx_freq);
       }
+      
+      if (c25lc_i2c_present)
+      {
+        c25_i2c_data = c25lc_switch_tx_lpf(mox, c25_i2c_data, c25_tx_freq);
+      }
+      
       break;
 #endif
 
@@ -1176,6 +1262,10 @@ C3
 
 #ifdef CHARLY25AB
       c25_rx1_freq = ntohl(*(uint32_t *)(frame + 1));
+      
+#ifdef DEBUG
+      fprintf(stderr, "c25_rx1_freq: %zu\n\n", c25_rx1_freq);
+#endif
 
       if(c25_rx1_freq < freq_min || c25_rx1_freq > freq_max) break;
       *rx_freq[0] = (uint32_t)floor(c25_rx1_freq / 125.0e6 * (1 << 30) + 0.5);
@@ -1206,6 +1296,10 @@ C3
 
 #ifdef CHARLY25AB
       c25_rx2_freq = ntohl(*(uint32_t *)(frame + 1));
+      
+#ifdef DEBUG
+      fprintf(stderr, "c25_rx2_freq: %zu\n\n", c25_rx2_freq);
+#endif
 
       if(c25_rx2_freq < freq_min || c25_rx2_freq > freq_max) break;
       *rx_freq[1] = (uint32_t)floor(c25_rx2_freq / 125.0e6 * (1 << 30) + 0.5);
@@ -1321,7 +1415,7 @@ C3
     case 20:
     case 21:
 
-#ifndef CHARLY25AB_STRIPPED
+#ifndef CHARLY25AB
       rx_att_data = frame[4] & 0x1f;
 #endif
 
@@ -1330,7 +1424,7 @@ C3
     case 22:
     case 23:
 
-#ifndef CHARLY25AB_STRIPPED
+#ifndef CHARLY25AB
       if(i2c_misc)
       {
         data = frame[1] & 0x1f;
@@ -1381,11 +1475,6 @@ C3
   fprintf(stderr, "Frame[2]: %d\n", frame[2]);
   fprintf(stderr, "Frame[3]: %d\n", frame[3]);
   fprintf(stderr, "Frame[4]: %d\n", frame[4]);
-  fprintf(stderr, "freq: %d, c25_tx_freq: %d\n\n", freq, c25_tx_freq);
-  fprintf(stderr, "freq: %d, c25_rx1_freq: %d\n\n", freq, c25_rx1_freq);
-  fprintf(stderr, "freq: %d, c25_rx2_freq: %d\n\n", freq, c25_rx2_freq);
-  fprintf(stderr, "freq: %d, c25_rx3_freq: %d\n\n", freq, c25_rx3_freq);
-  fprintf(stderr, "freq: %d, c25_rx4_freq: %d\n\n", freq, c25_rx4_freq);
 #endif
 }
 
