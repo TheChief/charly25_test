@@ -20,7 +20,7 @@
 30.01.2017 DG8MG: Added audio codec support for Charly 25 hardware outside a HAMlab.
 03.02.2017 DG8MG: Added basic support for the BPFs on the Charly 25 RX BPF board based on the first prototype board.
 04.02.2017 DG8MG: Added support for RX1 and RX2 using the BPFs on the new Charly 25 RX BPF board (different layout and PCA9555 I/O routing).
-16.02.2017 DG8MG: Added backward compatibility to the Charly 25LC (4 band version) board.
+16.02.2017 DG8MG: Added backward compatibility for the Charly 25LC (4 band version) board.
 */
 
 // DG8MG
